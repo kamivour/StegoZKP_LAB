@@ -31,22 +31,31 @@ python scripts/verify.py --help
 
 ## Sử dụng
 
-### Verify ảnh stego (REQUIRED: --key)
+`chaos_key.txt` đã được ship sẵn trong package này — không cần flag `--key`.
+
+### Verify ảnh stego (key tự động từ chaos_key.txt)
 
 ```bash
-python scripts/verify.py path/to/stego_image.png --key "your_secret_key"
+# Chạy từ thư mục verifier_package/ — chaos_key.txt được load tự động
+python scripts/verify.py path/to/stego_image.png
 ```
 
 ### Verify với verbose output
 
 ```bash
-python scripts/verify.py path/to/stego_image.png --key "your_secret_key" -v
+python scripts/verify.py path/to/stego_image.png -v
 ```
 
 ### Verify và output JSON
 
 ```bash
-python scripts/verify.py path/to/stego_image.png --key "your_secret_key" --json
+python scripts/verify.py path/to/stego_image.png --json
+```
+
+### Override key thủ công (nếu cần)
+
+```bash
+python scripts/verify.py path/to/stego_image.png --key "your_secret_key"
 ```
 
 ## Cấu trúc Package
@@ -62,9 +71,10 @@ verifier_package/
 └── README.md              # File này
 ```
 
-## 🔑 Bảo mật (v2.0)
+## 🔑 Bảo mật
 
-- **Secret key**: PHẢI được truyền qua kênh an toàn (HTTPS, encrypted message, ...)
-- **Không lưu trong ảnh**: Ảnh chỉ chứa hash của key để verify
-- **Verification key**: Là public key của ZK circuit, không cần bảo mật
-- **Backward compatible**: Vẫn hỗ trợ ảnh cũ (v1.0) nhưng sẽ hiển thị warning
+- **chaos_key.txt**: Key được ship một lần cùng với package này qua kênh an toàn;
+  sau đó chỉ cần nhận stego image — key không đi kèm với từng ảnh
+- **Không lưu trong ảnh**: Ảnh chỉ chứa SHA-256 hash của key để verify
+- **Verification key**: Là public key của ZK circuit (`circuits/compiled/build/verification_key.json`), không cần bảo mật
+- **Nếu chaos_key.txt bị thiếu**: Script sẽ báo lỗi rõ ràng và hướng dẫn cách cung cấp key

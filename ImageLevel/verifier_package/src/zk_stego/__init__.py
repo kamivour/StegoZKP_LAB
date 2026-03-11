@@ -1,36 +1,32 @@
 """
-ZK-SNARK Steganography Core Module
+ZK-SNARK Steganography — Verifier Package
+
+Extraction and verification only. No embedding, no prover.
 """
 
-from .chaos_embedding import (
+# DICOM steganography (extract + verify)
+from .dicom_handler import DicomHandler, DicomStego
+
+# Utility classes (for advanced usage)
+from .utils import (
     ChaosGenerator,
-    ChaosEmbedding,
-    ChaosProofArtifact,
+    LSBProcessor,
+    PNGChunkHandler,
+    SnarkJSRunner,
     generate_chaos_key_from_secret,
-    validate_chaos_parameters
+    generate_random_chaos_key,
+    compute_image_hash,
+    compute_file_hash,
+    extract_feature_point,
+    message_to_bits,
+    bits_to_bytes,
+    bytes_to_bits,
 )
 
-from .zk_proof_generator import ZKProofGenerator
-
-from .hybrid_proof_artifact import (
-    HybridProofArtifact,
-    embed_chaos_proof,
-    extract_chaos_proof,
-    verify_chaos_stego
-)
-
-# MetadataMessageGenerator không cần thiết cho verifier
-# from .metadata_message_generator import MetadataMessageGenerator
-
+__version__ = "2.0.0"
 __all__ = [
-    'ChaosGenerator',
-    'ChaosEmbedding',
-    'ChaosProofArtifact',
-    'ZKProofGenerator',
-    'HybridProofArtifact',
-    'generate_chaos_key_from_secret',
-    'validate_chaos_parameters',
-    'embed_chaos_proof',
-    'extract_chaos_proof',
-    'verify_chaos_stego'
+    "DicomHandler",
+    "DicomStego",
+    "SnarkJSRunner",
+    "generate_chaos_key_from_secret",
 ]

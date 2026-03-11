@@ -1,3 +1,5 @@
 # Python dependencies cho Verifier
 pillow>=9.0.0
 numpy>=1.21.0
+pydicom>=2.3.0
+scipy>=1.9.0
