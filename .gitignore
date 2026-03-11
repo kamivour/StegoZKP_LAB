@@ -55,7 +55,8 @@ ImageLevel/artifacts/keys/pot16_0001.ptau
 # =============================================================================
 # Stego output images produced during testing
 examples/testvectors/dicom_stego.png
-ImageLevel/examples/testvectors/dicom_stego.png
+ImageLevel/examples/dicom/
+ImageLevel/verifier_package/sent_image/
 
 # Temporary witness input/output JSON files
 witness_input_*.json

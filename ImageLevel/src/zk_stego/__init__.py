@@ -33,6 +33,9 @@ Convenience Functions:
 # Main classes
 from .prover import Prover
 
+# DICOM steganography
+from .dicom_handler import DicomHandler, DicomStego
+
 # Convenience functions
 from .prover import embed
 
@@ -56,6 +59,10 @@ __version__ = "2.0.0"
 __all__ = [
     # Main class
     "Prover",
+
+    # DICOM steganography
+    "DicomHandler",
+    "DicomStego",
 
     # Convenience function
     "embed",

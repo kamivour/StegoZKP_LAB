@@ -4,8 +4,11 @@ Prover Side (Sender) + Verifier Side (Receiver)
 
 What gets shared between the two sides:
   stego.png       -> the output image (looks identical to the original, safe to send publicly)
-  chaos_key       -> MUST be shared via a separate secure channel (Signal, WhatsApp, in person)
-                     NEVER include it alongside the image or embed it in the image
+
+  chaos_key       -> pre-shared ONCE during verifier setup (with verifier_package/)
+                     via a secure channel (Signal, in person, encrypted email)
+                     After the one-time setup, the prover sends ONLY stego.png.
+                     NEVER include the key alongside the image or embed it in the image
 
 
 ================================================================================
@@ -35,7 +38,8 @@ PREREQUISITES  (one-time setup)
 4. Install Python dependencies
    Run from inside ImageLevel/:
        pip install -r requirements.txt
-   Installs: numpy, Pillow, matplotlib, pandas
+   Installs: numpy, Pillow, matplotlib, pandas, pydicom, scipy
+   (pydicom and scipy are required for the DICOM extension scripts)
 
 5. Verify compiled circuit artifacts exist  (they ship pre-compiled)
        circuits/compiled/build/chaos_zk_stego.r1cs
@@ -46,7 +50,9 @@ PREREQUISITES  (one-time setup)
 
    If any are missing, recompile (requires bin\circom.exe):
        bin\circom.exe circuits\source\chaos_zk_stego.circom --r1cs --wasm --sym -o circuits\compiled\build
-   Then regenerate trusted setup keys using snarkjs and artifacts\keys\pot12_final.ptau.
+   Then regenerate trusted setup keys using snarkjs and artifacts\keys\pot16_final.ptau.
+   NOTE: The circuit has 18,429 constraints and REQUIRES pot16 (2^16 = 65,536 max).
+         pot12  (2^12 = 4,096 max) is insufficient for this circuit.
 
 --------------------------------------------------------------------------------
 RUNNING THE PROVER  —  CLI  (recommended)
@@ -122,6 +128,7 @@ The receiver only needs the verifier_package/ folder. They do NOT need the full
 ImageLevel/ folder — no embedding code, no circuit source, no proving keys.
 
 Contents of verifier_package/:
+    chaos_key.txt                        <- pre-shared chaos key (shipped with package)
     scripts/verify.py                    <- the main CLI tool
     src/zk_stego/                        <- Python source (chaos, ZK, hybrid)
     circuits/compiled/build/
@@ -162,12 +169,13 @@ Run from inside verifier_package/.
       python scripts\verify.py path\to\stego.png -v
 
   Mode 2 — Recipient (with key, ZK proof check + hidden message extraction):
-      python scripts\verify.py path\to\stego.png --key "my_chaos_key"
-      python scripts\verify.py path\to\stego.png --key "my_chaos_key" -v
+      python scripts\verify.py path\to\stego.png           # key read from chaos_key.txt
+      python scripts\verify.py path\to\stego.png -v
+      python scripts\verify.py path\to\stego.png --key "override_key"   # explicit override
 
   JSON output:
       python scripts\verify.py path\to\stego.png --json
-      python scripts\verify.py path\to\stego.png --key "my_chaos_key" --json
+      python scripts\verify.py path\to\stego.png --json -v
 
 --------------------------------------------------------------------------------
 WHAT THE VERIFIER ACTUALLY CHECKS
@@ -239,3 +247,34 @@ On the receiver machine (verifier_package/):
 
     -> [SUCCESS] Validate SUCCESS
     -> Hidden message: Meet at midnight
+
+
+================================================================================
+DICOM EXTENSION  (MEDICAL IMAGING)
+================================================================================
+
+For hiding DICOM patient metadata inside a medical image PNG, use the DICOM
+extension scripts instead. These are completely separate from the PNG stego
+system above and do not use the zkPF chunk approach.
+
+  See docs/DICOM_HOW_TO_RUN.md for the full DICOM guide.
+
+  Quick reference:
+
+  EMBED (sender side) — run from ImageLevel/:
+      python scripts\dicom_embed.py scan.dcm stego.png -v
+      python scripts\dicom_embed.py scan.dcm stego.png --no-proof
+
+  EXTRACT (recipient side) — run from verifier_package/:
+      python scripts\dicom_extract.py stego.png -v
+      python scripts\dicom_extract.py stego.png --save-meta tags.json
+
+  VERIFY ONLY (public auditor, no key needed) — run from verifier_package/:
+      python scripts\dicom_extract.py stego.png --verify-only
+
+  Key differences from the PNG stego system:
+    - Cover image is a 16-bit DICOM file (.dcm), not a plain PNG
+    - The hidden payload is ALL DICOM patient/study tags, not a text message
+    - Data is embedded in 2 LSBs of each 16-bit pixel (bits 1 and 0)
+    - No zkPF PNG chunk — everything lives in pixel bits
+    - Two separate keys: proof_key (public) + chaos_key (private)

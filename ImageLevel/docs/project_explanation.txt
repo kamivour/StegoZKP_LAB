@@ -30,10 +30,12 @@ bits across the image unpredictably:
 
   Arnold Cat Map: Given a point (x, y), the next point is
       (2x + y + noise) mod W,  (x + y + noise) mod H
-  Applying this 16 times produces a chain of positions across the image.
+  Applied 1-10 times per step (iteration count derived from the chaos_key),
+  producing a chain of positions spread across the image.
 
-  Logistic Map: x = r * x * (1 - x) with r = 3.9 produces a chaotic number
-  sequence used to add an offset (noise) to each Arnold step.
+  Logistic Map: x = r * x * (1 - x) with r derived from the chaos_key
+  (always in [3.57, 3.99) — the fully chaotic regime) produces a chaotic
+  number sequence used to add an offset (noise) to each Arnold step.
 
 The crucial property: with the same starting point (x0, y0) and the same
 chaos_key, you always get the exact same list of positions. That is what
@@ -85,6 +87,7 @@ ImageLevel/
 |
 +-- src/zk_stego/                          Core Python library (prover side)
 |   +-- prover.py                          Prover class: embed_and_prove()
+|   +-- dicom_handler.py                   DicomHandler + DicomStego (DICOM extension)
 |   +-- utils.py                           ChaosGenerator, LSBProcessor, PNGChunkHandler, SnarkJSRunner
 |   +-- poseidon.py                        Poseidon wrapper -> poseidon_helper.js
 |   +-- __init__.py
@@ -103,10 +106,14 @@ ImageLevel/
 |   +-- setup.bat / setup.sh
 |
 +-- scripts/
-|   +-- embed.py                          CLI tool for embedding (wraps Prover)
+|   +-- embed.py                          CLI tool for embedding a message into a PNG
+|   +-- dicom_embed.py                    CLI tool for embedding DICOM metadata into a PNG
+|   +-- dicom_extract.py                  CLI tool for extracting DICOM metadata + verify
 |
 +-- poseidon_helper.js                    Node.js Poseidon bridge (circomlibjs / BN254)
-+-- examples/testvectors/                 Sample images for testing
++-- examples/
+    +-- testvectors/                      Sample PNG images for testing
+    +-- dicom/                            Sample .dcm files + generated stego PNGs
 
 
 ================================================================================
@@ -170,7 +177,8 @@ Step 8  Embed metadata into PNG as a custom "zkPF" chunk
 END-TO-END FLOW: VERIFICATION
 ================================================================================
 
-Entry point:  python scripts/verify.py stego.png [--key chaos_key]
+Entry point:  python verifier_package/scripts/verify.py stego.png [--key chaos_key]
+              (run from inside verifier_package/ as:  python scripts/verify.py ...)
 
 Step 1  Read zkPF chunk
         Parse the custom PNG chunk -> proof, public inputs, chaos metadata.
@@ -294,10 +302,12 @@ stego.png + chaos_key
         |
         v
 [1] Read zkPF chunk -> proof, public inputs, x0, y0, proof_length
-[2] Re-derive 16 positions using chaos_key (if provided)
+[2] Re-derive positions using chaos_key (iteration count from key, r from key)
 [3] Read LSBs at those positions -> 32 bits -> decode -> message
 [4] snarkjs groth16 verify verification_key.json -> PASS / FAIL
         |
         v
  [SUCCESS]  Hidden message: "Secret message"
  [FAILED]   Proof is invalid or image was tampered
+
+Run as:  cd verifier_package && python scripts/verify.py stego.png --key ...
