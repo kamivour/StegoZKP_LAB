@@ -1,0 +1,16 @@
+{
+  "name": "zk-snark-steganography",
+  "version": "2.0.0",
+  "description": "Production-ready ZK-SNARK Steganography System",
+  "scripts": {
+    "compile": "bin/circom.exe circuits/source/chaos_zk_stego.circom --r1cs --wasm --sym --c -o circuits/compiled/build"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7"
+  },
+  "devDependencies": {
+    "snarkjs": "^0.7.0"
+  }
+}
+

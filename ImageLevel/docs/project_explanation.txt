@@ -1,0 +1,303 @@
+ImageLevel - Complete Project Walkthrough
+==========================================
+
+What this project does in one sentence
+---------------------------------------
+A sender hides a secret message inside a PNG image (steganography), then generates
+a ZK-SNARK proof that says: "I correctly embedded a message using the right secret
+key and algorithm" — without revealing the message or the key. The receiver (or any
+third party) can verify that proof independently.
+
+
+================================================================================
+THE 3 CORE TECHNOLOGIES
+================================================================================
+
+1. Steganography  —  LSB (Least Significant Bit)
+-------------------------------------------------
+Every pixel is a number 0-255. The last bit of that number is invisible to the
+human eye — changing 200 (11001000) to 201 (11001001) is imperceptible. The
+system hides message bits by overwriting those last bits.
+
+    Pixel = 200 = 11001000   [embed 1]   -> 201 = 11001001
+    Pixel = 150 = 10010110   [embed 0]   -> 150 = 10010110  (unchanged)
+
+
+2. Chaos Theory  —  deciding WHERE to embed
+--------------------------------------------
+Instead of embedding bits left-to-right in order, two chaos functions scatter the
+bits across the image unpredictably:
+
+  Arnold Cat Map: Given a point (x, y), the next point is
+      (2x + y + noise) mod W,  (x + y + noise) mod H
+  Applying this 16 times produces a chain of positions across the image.
+
+  Logistic Map: x = r * x * (1 - x) with r = 3.9 produces a chaotic number
+  sequence used to add an offset (noise) to each Arnold step.
+
+The crucial property: with the same starting point (x0, y0) and the same
+chaos_key, you always get the exact same list of positions. That is what
+makes extraction possible.
+
+
+3. ZK-SNARK  —  the proof layer
+--------------------------------
+A ZK-SNARK (Groth16) is a cryptographic proof that says: "I know some private
+values that satisfy these rules, but I will not tell you those values."
+
+In this system the prover generates a proof saying:
+  "I know x0, y0, chaosKey that correctly derive 16 pixel positions;
+   those positions hash to this Merkle root;
+   the message bits hash to this commitment;
+   the image used is the one with this SHA-256 hash."
+
+The verifier checks the proof without ever seeing x0, y0, chaosKey, or the
+message itself.
+
+Poseidon hashing (BN254 field-native) is used throughout so that hash values
+computed in Python match exactly what the circuit expects. This is implemented
+in poseidon_helper.js (Node.js / circomlibjs) and called by the Python code.
+
+
+================================================================================
+FILE LAYOUT
+================================================================================
+
+ImageLevel/
++-- bin/
+|   +-- circom.exe                          Circom compiler (Windows binary)
+|
++-- circuits/
+|   +-- source/
+|   |   +-- chaos_zk_stego.circom          Active ZK circuit (SecureChaosZKStego)
+|   +-- compiled/build/
+|       +-- chaos_zk_stego.r1cs            Circuit constraints (compiled)
+|       +-- chaos_zk_stego.zkey            Proving key (trusted setup output)
+|       +-- chaos_zk_stego_verification_key.json   Public verification key
+|       +-- chaos_zk_stego_js/
+|           +-- chaos_zk_stego.wasm        Circuit compiled to WebAssembly
+|           +-- generate_witness.js        CLI wrapper for witness calculator
+|           +-- witness_calculator.js      WASM bridge
+|
++-- artifacts/keys/
+|   +-- pot12_final.ptau                   Powers of Tau ceremony file (supports up to 4096 constraints)
+|   +-- pot16_final.ptau                   Powers of Tau for larger circuits (up to 65536 constraints)
+|
++-- src/zk_stego/                          Core Python library (prover side)
+|   +-- prover.py                          Prover class: embed_and_prove()
+|   +-- utils.py                           ChaosGenerator, LSBProcessor, PNGChunkHandler, SnarkJSRunner
+|   +-- poseidon.py                        Poseidon wrapper -> poseidon_helper.js
+|   +-- __init__.py
+|
++-- verifier_package/                      Standalone distributable for the receiver
+|   +-- scripts/verify.py                 CLI verification tool
+|   +-- src/zk_stego/
+|   |   +-- chaos_embedding.py            ChaosGenerator + LSB embedding
+|   |   +-- zk_proof_generator.py         snarkjs orchestration (verify)
+|   |   +-- hybrid_proof_artifact.py      High-level extract + verify API
+|   |   +-- poseidon.py                   Same Poseidon wrapper (standalone copy)
+|   |   +-- __init__.py
+|   +-- circuits/compiled/build/
+|   |   +-- verification_key.json         Public key (no secrets — safe to distribute)
+|   +-- requirements.txt
+|   +-- setup.bat / setup.sh
+|
++-- scripts/
+|   +-- embed.py                          CLI tool for embedding (wraps Prover)
+|
++-- poseidon_helper.js                    Node.js Poseidon bridge (circomlibjs / BN254)
++-- examples/testvectors/                 Sample images for testing
+
+
+================================================================================
+END-TO-END FLOW: EMBEDDING
+================================================================================
+
+Entry point:  python scripts/embed.py  or  Prover().embed_and_prove()
+
+Step 1  Load cover image
+        cover_array = numpy array of shape (height, width, 3)
+
+Step 2  Hash chaos_key
+        SHA-256(chaos_key string) -> 64-bit integer chaos_key_int
+
+Step 3  Find starting position (x0, y0)
+        extract_feature_point() scans for the highest-gradient region of the
+        image — a "busy" area where 1-bit changes are least noticeable.
+
+Step 4  Convert message to bits
+        "Hello" -> UTF-8 -> 40 bits. The circuit uses the first 32 bits (4 bytes).
+        Bits are zero-padded to exactly 32.
+
+Step 5  Compute ZK parameters via poseidon_helper.js (Node.js)
+        Python calls:  node poseidon_helper.js '{"type":"compute_all", ...}'
+        This computes using circomlibjs (BN254 Poseidon) to match the circuit:
+          - 16 positions via SecureArnoldCatMap iterations
+          - publicCommitment via SecureMessageCommitment
+          - publicNullifier via Nullifier(secret, nonce)
+
+Step 6  LSB embedding
+        LSBProcessor.embed_bits(): for each of the 16 positions, overwrite the
+        last bit of the red channel pixel with the corresponding message bit.
+        Output image is saved as PNG (lossless — JPEG would destroy embedded bits).
+
+Step 7  Generate ZK proof
+        a) Build witness input JSON:
+             Public:  publicCommitment, publicImageHash[8], publicNullifier
+             Private: messageBits[32], chaosKey, randomness, secret, nonce,
+                      x0, y0, positions[16][2], imageHashPrivate[8]
+
+        b) Generate witness:
+             node generate_witness.js circuit.wasm input.json witness.wtns
+             The WASM file evaluates all circuit constraints and writes a
+             .wtns binary (all internal circuit variable assignments).
+
+        c) Generate Groth16 proof:
+             snarkjs groth16 prove circuit.zkey witness.wtns proof.json public.json
+             Output: proof.json (~739 bytes) with 3 elliptic curve points:
+             pi_a, pi_b, pi_c. These encode the proof mathematically.
+
+Step 8  Embed metadata into PNG as a custom "zkPF" chunk
+        PNGChunkHandler inserts a JSON block before the PNG IEND marker:
+          chaos.initial_position  -> {x: x0, y: y0}
+          chaos.chaos_key_hash    -> SHA-256(chaos_key_int)[:16]  (hash, not the key)
+          chaos.proof_length      -> number of bits embedded
+          public.publicCommitment, publicImageHash, publicNullifier
+          proof.pi_a, pi_b, pi_c
+
+
+================================================================================
+END-TO-END FLOW: VERIFICATION
+================================================================================
+
+Entry point:  python scripts/verify.py stego.png [--key chaos_key]
+
+Step 1  Read zkPF chunk
+        Parse the custom PNG chunk -> proof, public inputs, chaos metadata.
+
+Step 2  Message extraction  (only if --key is provided)
+        ChaosEmbedding re-derives the 16 positions from x0, y0, chaos_key.
+        Reads the last bit of each pixel at those positions -> 32 bits -> message.
+
+Step 3  ZK proof verification  (always performed)
+        snarkjs groth16 verify verification_key.json public.json proof.json
+        Checks pi_a, pi_b, pi_c against publicCommitment, publicImageHash[8],
+        publicNullifier using only the public verification_key.json.
+        PASS = the proof is cryptographically valid.
+
+The two operations are independent:
+  - Anyone can verify the proof without the key  (public auditor mode).
+  - Only the holder of chaos_key can extract the message  (recipient mode).
+
+
+================================================================================
+THE ZK CIRCUIT: SecureChaosZKStego
+================================================================================
+
+circuits/source/chaos_zk_stego.circom  —  written in Circom 2.0.
+Constraint count: ~5,000+ (brute-force resistant).
+
+Public signals (what the verifier sees):
+    publicCommitment        Poseidon hash of message bits + chaosKey + randomness
+    publicImageHash[8]      SHA-256 of the cover image, split into 8 field elements
+    publicNullifier         Poseidon(secret, nonce) — prevents replay attacks
+
+Private signals (what only the prover knows):
+    messageBits[32]         The 32-bit message
+    chaosKey, randomness    Used in commitment
+    secret, nonce           Used in nullifier
+    x0, y0                  Starting position
+    positions[16][2]        The 16 embedding pixel coordinates
+    imageHashPrivate[8]     Private copy of the image hash
+
+Constraint groups:
+
+  #  | Template                    | What it proves
+  ---|-----------------------------|--------------------------------------------------
+  1  | messageBits[i]*(1-...)===0  | Every message bit is truly 0 or 1  (32 checks)
+  2  | SecureMessageCommitment     | commitment = Poseidon(messageBits, chaosKey, rand)
+  3  | Nullifier                   | nullifier = Poseidon(secret, nonce)
+  4  | ImageHashVerification       | imageHashPrivate == publicImageHash  (8 checks)
+  5  | FullPositionVerification    | All 16 positions correctly derived by
+     |                             | SecureArnoldCatMap from (x0,y0,chaosKey)
+  6  | AllPositionsRangeProof      | Every position (x,y) is inside [0, 1024)
+  7  | PositionMerkleTree          | Merkle root of all 16 positions committed
+
+ZK KEY INSIGHT:
+The prover supplies x0, y0, chaosKey, positions, and messagesBits as private inputs.
+The circuit checks every constraint. The resulting proof (pi_a, pi_b, pi_c) is a
+mathematical guarantee those checks passed — but none of the private values are revealed.
+
+
+================================================================================
+POSEIDON HASHING  —  WHY NODE.JS
+================================================================================
+
+The circuit uses Poseidon hashes (field-native for BN254). The Python code must
+produce values that match exactly what the circuit evaluates internally. 
+
+Python does not have a native BN254 Poseidon. The solution:
+    poseidon_helper.js  (Node.js, uses circomlibjs)
+    poseidon.py         (Python, calls node poseidon_helper.js via subprocess)
+
+The Python side sends task JSON, Node runs the circomlibjs Poseidon, returns
+decimal string results. This guarantees prover, circuit, and verifier all
+compute identical hashes.
+
+
+================================================================================
+TRUSTED SETUP  —  THE .ptau FILES
+================================================================================
+
+Groth16 requires a one-time two-phase trusted setup:
+
+  Phase 1 — Powers of Tau (universal)
+      Produces a .ptau file via a community ceremony. Security holds as long as
+      at least one participant destroyed their secret.
+      pot12_final.ptau: supports circuits up to 2^12 = 4,096 constraints.
+      pot16_final.ptau: supports circuits up to 2^16 = 65,536 constraints.
+
+  Phase 2 — Circuit-specific setup
+      Uses .ptau + compiled .r1cs -> produces chaos_zk_stego.zkey (proving key)
+      and chaos_zk_stego_verification_key.json (public verification key).
+      The .zkey is needed to generate proofs; the verification_key.json is
+      public and distributed to verifiers.
+
+
+================================================================================
+SUMMARY DATA FLOW
+================================================================================
+
+SENDER SIDE  (ImageLevel/)
+--------------------------
+cover.png + "Secret message" + chaos_key
+        |
+        v
+[1] Find starting position (x0, y0) from image gradient
+[2] Hash chaos_key -> chaos_key_int
+[3] poseidon_helper.js: compute 16 positions + commitment + nullifier
+[4] LSBProcessor: overwrite last bit of 16 pixels -> stego image saved
+[5] Build witness input JSON (private + public values)
+[6] node generate_witness.js WASM -> witness.wtns
+[7] snarkjs groth16 prove .zkey witness -> proof.json + public.json
+[8] PNGChunkHandler: embed zkPF chunk (metadata + proof) into stego.png
+        |
+        v
+ stego.png  (distribute via any channel)
+ chaos_key  (distribute via SEPARATE secure channel)
+
+====================================================================
+
+RECEIVER SIDE  (verifier_package/)
+-----------------------------------
+stego.png + chaos_key
+        |
+        v
+[1] Read zkPF chunk -> proof, public inputs, x0, y0, proof_length
+[2] Re-derive 16 positions using chaos_key (if provided)
+[3] Read LSBs at those positions -> 32 bits -> decode -> message
+[4] snarkjs groth16 verify verification_key.json -> PASS / FAIL
+        |
+        v
+ [SUCCESS]  Hidden message: "Secret message"
+ [FAILED]   Proof is invalid or image was tampered

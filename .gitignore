@@ -1,0 +1,82 @@
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# =============================================================================
+# Node.js
+# =============================================================================
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.npm
+
+# =============================================================================
+# ZK circuit build artifacts  (generated — do not commit)
+# =============================================================================
+# Witness files are generated fresh each run
+circuits/compiled/build/*.wtns
+ImageLevel/circuits/compiled/build/*.wtns
+
+# =============================================================================
+# ZK circuit compiled artifacts  (DO commit — pre-built for distribution)
+# These are large but required; recipients cannot recompile without circom
+# Comment out these lines if you want to exclude them and distribute separately
+# =============================================================================
+# circuits/compiled/build/*.r1cs
+# circuits/compiled/build/*.zkey
+# circuits/compiled/build/*.sym
+# circuits/compiled/build/*.wasm
+# circuits/compiled/build/chaos_zk_stego_verification_key.json
+
+# =============================================================================
+# Powers of Tau ceremony files  (large binary files)
+# pot12_final.ptau is needed to regenerate .zkey — include if repo size allows
+# =============================================================================
+artifacts/keys/pot16_0000.ptau
+artifacts/keys/pot16_0001.ptau
+ImageLevel/artifacts/keys/pot16_0000.ptau
+ImageLevel/artifacts/keys/pot16_0001.ptau
+
+# =============================================================================
+# Temporary / test output files
+# =============================================================================
+# Stego output images produced during testing
+examples/testvectors/dicom_stego.png
+ImageLevel/examples/testvectors/dicom_stego.png
+
+# Temporary witness input/output JSON files
+witness_input_*.json
+witness_*.wtns
+proof_*.json
+public_*.json
+
+# =============================================================================
+# OS / editor
+# =============================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# =============================================================================
+# Logs & misc
+# =============================================================================
+*.log
+*.tmp
+*.bak

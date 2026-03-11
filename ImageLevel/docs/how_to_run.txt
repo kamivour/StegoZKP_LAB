@@ -1,0 +1,241 @@
+HOW TO RUN THE SYSTEM
+=====================
+Prover Side (Sender) + Verifier Side (Receiver)
+
+What gets shared between the two sides:
+  stego.png       -> the output image (looks identical to the original, safe to send publicly)
+  chaos_key       -> MUST be shared via a separate secure channel (Signal, WhatsApp, in person)
+                     NEVER include it alongside the image or embed it in the image
+
+
+================================================================================
+PROVER SIDE (SENDER)
+================================================================================
+
+The sender uses the full ImageLevel/ folder.
+
+--------------------------------------------------------------------------------
+PREREQUISITES  (one-time setup)
+--------------------------------------------------------------------------------
+
+1. Install Node.js
+   Download from https://nodejs.org and install.
+   Verify:
+       node --version
+       npm --version
+
+2. Install snarkjs globally
+       npm install -g snarkjs
+
+3. Install circomlib / circomlibjs  (circuit dependencies)
+   Run from inside ImageLevel/:
+       npm install
+   This reads package.json and downloads circomlib and circomlibjs into node_modules/.
+
+4. Install Python dependencies
+   Run from inside ImageLevel/:
+       pip install -r requirements.txt
+   Installs: numpy, Pillow, matplotlib, pandas
+
+5. Verify compiled circuit artifacts exist  (they ship pre-compiled)
+       circuits/compiled/build/chaos_zk_stego.r1cs
+       circuits/compiled/build/chaos_zk_stego.zkey
+       circuits/compiled/build/chaos_zk_stego_verification_key.json
+       circuits/compiled/build/chaos_zk_stego_js/chaos_zk_stego.wasm
+       circuits/compiled/build/chaos_zk_stego_js/generate_witness.js
+
+   If any are missing, recompile (requires bin\circom.exe):
+       bin\circom.exe circuits\source\chaos_zk_stego.circom --r1cs --wasm --sym -o circuits\compiled\build
+   Then regenerate trusted setup keys using snarkjs and artifacts\keys\pot12_final.ptau.
+
+--------------------------------------------------------------------------------
+RUNNING THE PROVER  —  CLI  (recommended)
+--------------------------------------------------------------------------------
+
+Run from ImageLevel/ using scripts\embed.py:
+
+  Full embed + ZK proof:
+      python scripts\embed.py cover.png stego.png "Secret message" --key "my_chaos_key"
+
+  Embed only (skip ZK proof, faster):
+      python scripts\embed.py cover.png stego.png "Secret message" --key "my_chaos_key" --no-proof
+
+  Verbose output:
+      python scripts\embed.py cover.png stego.png "Secret message" --key "my_chaos_key" -v
+
+  JSON output (for scripting):
+      python scripts\embed.py cover.png stego.png "Secret message" --key "my_chaos_key" --json
+
+  All options:
+      python scripts\embed.py --help
+
+Parameters:
+    cover.png       -> any PNG image to use as the carrier
+    stego.png       -> path for the output image (must be .png)
+    "Secret..."     -> the message to hide (quote it if it contains spaces)
+    --key           -> your chaos key string (keep this private)
+    --no-proof      -> skip ZK proof generation (embed only, no snarkjs needed)
+
+--------------------------------------------------------------------------------
+RUNNING THE PROVER  —  Python API
+--------------------------------------------------------------------------------
+
+Run from ImageLevel/:
+
+    import sys
+    sys.path.append('src')
+    from zk_stego.prover import Prover
+
+    result = Prover().embed_and_prove(
+        cover_image_path='examples/testvectors/dicom_test.png',
+        output_path='stego.png',
+        message='Secret message',
+        chaos_key='my_chaos_key',          # omit to auto-generate a random key
+        generate_zk_proof=True             # False = embed only (faster)
+    )
+
+    print('Saved to:', result['stego_image_path'])
+    print('chaos_key (share via secure channel):', result['chaos_key'])
+    print('Proof generated:', result['proof'] is not None)
+
+--------------------------------------------------------------------------------
+WHAT THE PROVER OUTPUTS
+--------------------------------------------------------------------------------
+
+After running you get two things to distribute:
+    stego.png  -> Send via any channel (email, USB, etc.) — looks like the original
+    chaos_key  -> Send via a DIFFERENT secure channel
+
+The stego.png file contains a hidden "zkPF" PNG chunk holding:
+    - Starting position (x0, y0)
+    - SHA-256 hash of the chaos key (not the key itself)
+    - Number of embedded bits
+    - ZK proof (pi_a, pi_b, pi_c) if generated
+    - Public inputs for verification (commitment, image hash, nullifier)
+
+
+================================================================================
+VERIFIER SIDE (RECEIVER)
+================================================================================
+
+The receiver only needs the verifier_package/ folder. They do NOT need the full
+ImageLevel/ folder — no embedding code, no circuit source, no proving keys.
+
+Contents of verifier_package/:
+    scripts/verify.py                    <- the main CLI tool
+    src/zk_stego/                        <- Python source (chaos, ZK, hybrid)
+    circuits/compiled/build/
+        verification_key.json            <- public key for proof verification (no secrets)
+    requirements.txt
+    setup.bat   (Windows)
+    setup.sh    (Linux / Mac)
+
+--------------------------------------------------------------------------------
+PREREQUISITES  (one-time setup)
+--------------------------------------------------------------------------------
+
+Option A — setup script (recommended):
+
+    Windows:
+        cd verifier_package
+        setup.bat
+
+    Linux / Mac:
+        cd verifier_package
+        chmod +x setup.sh && ./setup.sh
+
+    The script checks Node.js, runs  npm install -g snarkjs  and
+    pip install -r requirements.txt  (just pillow and numpy).
+
+Option B — manual:
+        npm install -g snarkjs
+        pip install pillow numpy
+
+--------------------------------------------------------------------------------
+RUNNING THE VERIFIER  —  CLI
+--------------------------------------------------------------------------------
+
+Run from inside verifier_package/.
+
+  Mode 1 — Public auditor (no key required, ZK proof check only):
+      python scripts\verify.py path\to\stego.png
+      python scripts\verify.py path\to\stego.png -v
+
+  Mode 2 — Recipient (with key, ZK proof check + hidden message extraction):
+      python scripts\verify.py path\to\stego.png --key "my_chaos_key"
+      python scripts\verify.py path\to\stego.png --key "my_chaos_key" -v
+
+  JSON output:
+      python scripts\verify.py path\to\stego.png --json
+      python scripts\verify.py path\to\stego.png --key "my_chaos_key" --json
+
+--------------------------------------------------------------------------------
+WHAT THE VERIFIER ACTUALLY CHECKS
+--------------------------------------------------------------------------------
+
+Step 1  Read the zkPF chunk from the PNG.
+Step 2  Reconstruct chaos positions using x0, y0, chaos_key (if provided).
+Step 3  Extract bits from image pixels at those positions (if key provided).
+Step 4  Decode bits -> bytes -> UTF-8 -> hidden message (if key provided).
+Step 5  Run:  snarkjs groth16 verify verification_key.json public.json proof.json
+        This checks pi_a, pi_b, pi_c against the public inputs mathematically.
+        Uses only verification_key.json — completely public, no private data needed.
+        PASS means the proof is cryptographically valid.
+
+--------------------------------------------------------------------------------
+SAMPLE OUTPUT
+--------------------------------------------------------------------------------
+
+With key (recipient mode):
+    ZK-SNARK Proof Verified in stego.png
+       Type: Groth16 ZK-SNARK
+       Algorithm: arnold_cat_logistic
+       Size: 232 bits
+    [SUCCESS] Validate SUCCESS
+       Hidden message: Minh, Age 21
+
+Without key (public auditor mode):
+    ZK-SNARK Proof Verified in stego.png
+       Type: Groth16 ZK-SNARK
+       Algorithm: arnold_cat_logistic
+       Size: 232 bits
+    [SUCCESS] Validate SUCCESS
+       Note: Supply --key to also extract the hidden message
+
+Failure case (wrong key or tampered image):
+    ERROR: No valid ZK proof artifact found in image
+    [FAILED] Validate FAILED
+
+--------------------------------------------------------------------------------
+IMPORTANT NOTES
+--------------------------------------------------------------------------------
+
+1. verification_key.json in verifier_package/ MUST match the one used when the
+   proof was generated. If the prover regenerates their trusted setup (.zkey),
+   send the receiver a new verification_key.json as well.
+
+2. Without --key the verifier confirms the ZK proof is valid but does NOT reveal
+   the hidden message. The proof check and message extraction are independent.
+
+3. If the image was embedded without a ZK proof (--no-proof), the verifier
+   reports WARNING — it confirms metadata structure is intact but cannot do
+   cryptographic verification.
+
+
+================================================================================
+FULL END-TO-END EXAMPLE
+================================================================================
+
+On the sender machine (ImageLevel/):
+
+    python scripts\embed.py examples\testvectors\dicom_test.png stego.png "Meet at midnight" --key "supersecretkey42" -v
+
+    -> Sends stego.png via any channel
+    -> Sends "supersecretkey42" via Signal / WhatsApp / in person
+
+On the receiver machine (verifier_package/):
+
+    python scripts\verify.py stego.png --key "supersecretkey42" -v
+
+    -> [SUCCESS] Validate SUCCESS
+    -> Hidden message: Meet at midnight
