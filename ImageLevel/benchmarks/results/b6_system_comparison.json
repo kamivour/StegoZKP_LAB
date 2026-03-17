@@ -1,0 +1,138 @@
+{
+  "benchmark_c_stego_only": {
+    "benchmark": "C_stego_only",
+    "n_runs": 10,
+    "per_image": [
+      {
+        "image": "1-01",
+        "embed_mean_s": 2.5672,
+        "embed_std_s": 0.0102,
+        "extract_mean_s": 3.8771,
+        "extract_std_s": 0.0227
+      },
+      {
+        "image": "1-02",
+        "embed_mean_s": 2.5751,
+        "embed_std_s": 0.0161,
+        "extract_mean_s": 3.8744,
+        "extract_std_s": 0.0243
+      },
+      {
+        "image": "1-03",
+        "embed_mean_s": 2.6089,
+        "embed_std_s": 0.1216,
+        "extract_mean_s": 3.867,
+        "extract_std_s": 0.0158
+      },
+      {
+        "image": "1-04",
+        "embed_mean_s": 2.5698,
+        "embed_std_s": 0.0181,
+        "extract_mean_s": 3.8802,
+        "extract_std_s": 0.0153
+      },
+      {
+        "image": "1-05",
+        "embed_mean_s": 2.5729,
+        "embed_std_s": 0.0215,
+        "extract_mean_s": 3.8882,
+        "extract_std_s": 0.0312
+      },
+      {
+        "image": "1-06",
+        "embed_mean_s": 2.5632,
+        "embed_std_s": 0.0101,
+        "extract_mean_s": 3.8719,
+        "extract_std_s": 0.025
+      },
+      {
+        "image": "1-07",
+        "embed_mean_s": 2.5615,
+        "embed_std_s": 0.0201,
+        "extract_mean_s": 3.8667,
+        "extract_std_s": 0.0233
+      },
+      {
+        "image": "1-08",
+        "embed_mean_s": 2.5653,
+        "embed_std_s": 0.0125,
+        "extract_mean_s": 3.8904,
+        "extract_std_s": 0.0397
+      },
+      {
+        "image": "1-09",
+        "embed_mean_s": 2.5798,
+        "embed_std_s": 0.0163,
+        "extract_mean_s": 3.8784,
+        "extract_std_s": 0.0263
+      },
+      {
+        "image": "1-10",
+        "embed_mean_s": 2.5671,
+        "embed_std_s": 0.015,
+        "extract_mean_s": 3.8776,
+        "extract_std_s": 0.0274
+      }
+    ],
+    "summary": {
+      "embed_mean_s": 2.5731,
+      "embed_std_s": 0.0131,
+      "extract_mean_s": 3.8772
+    },
+    "note": "Pixel quality (PSNR/SSIM) and steganalysis results are identical to Stego+ZK \u2014 the ZK proof does not change the carrier pixels."
+  },
+  "benchmark_d_ecdsa": {
+    "benchmark": "D_ecdsa",
+    "error": "The 'cryptography' package is not installed. Run: pip install cryptography"
+  },
+  "capability_table": {
+    "systems": [
+      "DICOM Digital Sig (PS3.15)",
+      "Stego only (--no-proof)",
+      "This work (Stego + ZK)"
+    ],
+    "properties": {
+      "Metadata hidden from DICOM viewers": [
+        false,
+        true,
+        true
+      ],
+      "Integrity guarantee": [
+        "RSA/ECDSA",
+        "SHA-256 (key-bound)",
+        "Groth16 + SHA-256"
+      ],
+      "Publicly verifiable (no prover secret)": [
+        true,
+        false,
+        true
+      ],
+      "Proves embedding correctness": [
+        false,
+        false,
+        true
+      ],
+      "Covert channel": [
+        false,
+        true,
+        true
+      ],
+      "PKI required": [
+        true,
+        false,
+        false
+      ],
+      "Detectable by DICOM tag inspection": [
+        true,
+        false,
+        false
+      ],
+      "Zero-knowledge property": [
+        false,
+        false,
+        true
+      ]
+    }
+  },
+  "note": "ECDSA benchmarks the cryptographic primitive only. Full DICOM PS3.15 digital signatures require additional PKI overhead (certificate chain lookup, timestamp authority, CA infrastructure). Groth16 ZK proof timing: see b5_performance.json zk_timing entry."
+}

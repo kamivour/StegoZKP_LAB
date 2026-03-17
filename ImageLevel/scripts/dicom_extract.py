@@ -44,6 +44,7 @@ from src.zk_stego.dicom_handler import (
     DicomStego,
     DicomHandler,
     DEFAULT_PROOF_KEY,
+    BORDER_EROSION_ITERATIONS,
     HEADER_SIZE,
     HEADER_POSITIONS,
     _bytes_to_bits,
@@ -55,7 +56,8 @@ from src.zk_stego.dicom_handler import (
 from src.zk_stego.utils import generate_chaos_key_from_secret
 
 
-def verify_only(stego_png: str, proof_key: str, verbose: bool, as_json: bool) -> None:
+def verify_only(stego_png: str, proof_key: str, verbose: bool, as_json: bool,
+                erosion_iterations: int = BORDER_EROSION_ITERATIONS) -> None:
     """
     Public-auditor mode: verify the ZK proof without the chaos_key.
     Reads only the proof_key region. Metadata remains hidden.
@@ -65,7 +67,7 @@ def verify_only(stego_png: str, proof_key: str, verbose: bool, as_json: bool) ->
 
     pixel_array = np.array(Image.open(stego_png), dtype=np.uint16)
     height, width = pixel_array.shape
-    roi_mask = DicomHandler.detect_roi(pixel_array)
+    roi_mask = DicomHandler.detect_border_zone(pixel_array, erosion_iterations)
 
     proof_key_int = generate_chaos_key_from_secret(proof_key)
     stego_obj = DicomStego()
@@ -184,6 +186,9 @@ Key lookup order
                         help="Only verify the ZK proof, do not extract metadata")
     parser.add_argument("--save-meta", metavar="FILE",
                         help="Save recovered metadata JSON to this file")
+    parser.add_argument("--restore-output", metavar="FILE",
+                        help="Save RDH-restored original image to this file (16-bit PNG). "
+                             "Only written if extraction and integrity check both pass.")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Verbose output")
     parser.add_argument("--json", "-j", action="store_true",
@@ -199,6 +204,11 @@ Key lookup order
     if args.verify_only:
         verify_only(args.image, args.proof_key, args.verbose, args.json)
         return
+
+    # Warn if --restore-output requested without full extraction
+    if getattr(args, "restore_output", None) and args.verify_only:
+        print("WARNING: --restore-output requires full extraction (not --verify-only). Ignoring.",
+              file=sys.stderr)
 
     # Resolve chaos_key: --key overrides --key-file
     chaos_key = args.key
@@ -230,6 +240,16 @@ Key lookup order
         proof_key=args.proof_key,
         verbose=args.verbose and not args.json,
     )
+
+    # RDH: save restored image if requested
+    if getattr(args, "restore_output", None) and result.get("restored_pixel_array") is not None:
+        import numpy as np
+        from PIL import Image as _PILImage
+        _PILImage.fromarray(result["restored_pixel_array"].astype(np.uint16)).save(
+            args.restore_output
+        )
+        if not args.json:
+            print(f"RDH restored image saved to: {args.restore_output}")
 
     if args.json:
         safe = {k: v for k, v in result.items() if k not in ("proof", "public_inputs")}

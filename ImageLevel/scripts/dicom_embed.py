@@ -155,7 +155,7 @@ The chaos_key is NEVER stored in the image.
     print(f"   Image size   : {info['rows']} × {info['cols']} px")
     print(f"   Metadata     : {result['metadata_bytes']} B compressed  "
           f"({result['metadata_bits']} bits embedded)")
-    print(f"   ROI pixels   : {result['roi_pixels']}")
+    print(f"   Border pixels: {result['border_pixels']}")
     print(f"   ZK proof     : {'generated' if result['proof'] else 'not generated'}")
     print()
     print("Reminder: chaos_key was pre-shared with verifier during one-time setup.")

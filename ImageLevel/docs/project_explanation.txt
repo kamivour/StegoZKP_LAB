@@ -164,13 +164,27 @@ Step 7  Generate ZK proof
              Output: proof.json (~739 bytes) with 3 elliptic curve points:
              pi_a, pi_b, pi_c. These encode the proof mathematically.
 
-Step 8  Embed metadata into PNG as a custom "zkPF" chunk
-        PNGChunkHandler inserts a JSON block before the PNG IEND marker:
-          chaos.initial_position  -> {x: x0, y: y0}
-          chaos.chaos_key_hash    -> SHA-256(chaos_key_int)[:16]  (hash, not the key)
-          chaos.proof_length      -> number of bits embedded
-          public.publicCommitment, publicImageHash, publicNullifier
-          proof.pi_a, pi_b, pi_c
+Step 8  Embed everything into stego pixel data using two-key LSB system
+        Embedding targets the BORDER ZONE of the ROI (outermost 10-pixel ring
+        of tissue — skull/padding), not core diagnostic pixels.
+
+        Two independent chaos trajectories, each split into an undo sub-region
+        and a data sub-region (Reversible Data Hiding):
+
+        proof_key region  (public, default: "zkdicom_proof_key_v1"):
+          Positions derived from proof_key. Stores the 84-byte header
+          + ZK proof JSON + public inputs JSON.
+          Anyone with proof_key can locate and verify the ZK proof.
+          RDH: original LSBs of data pixels saved in parallel undo positions.
+
+        chaos_key region  (private, pre-shared once during verifier setup):
+          Positions derived from chaos_key. Stores gzip-compressed DICOM
+          metadata (all non-binary tags). Only the chaos_key holder can read it.
+          The key is never stored in the image; only its SHA-256 hash is (header).
+          RDH: original LSBs of data pixels saved in parallel undo positions.
+
+        After successful extraction, the verifier restores the exact original
+        pixel values by writing the saved undo bits back to the data positions.
 
 
 ================================================================================

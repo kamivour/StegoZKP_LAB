@@ -1,0 +1,1251 @@
+\documentclass{jstarticle}
+
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{green!50!black},
+  breaklines=true,
+  frame=none,
+  backgroundcolor=\color{gray!5},
+  showstringspaces=false
+}
+
+% If you have long equations
+% \documentclass[mathindent=1ex]{jstarticle}
+
+% Which journal to submit to.
+% - "ssad": Smart Systems and Devices
+% - "etsd": Engineering and Technology for Sustainable Development
+% - "ds-ai": Data Science and Artificial Intelligence
+% Default is "ssad".
+\submitTo{ssad}
+
+% Manuscript title
+\title{Verifiable DICOM Medical Record Transmission via Zero-Knowledge Proofs
+and Chaos-Based Image Steganography for Hospital Network Security}
+
+% Authors
+\author[1]{Trang Quang Do}
+\author[1]{Dang Nhat Minh}
+\author[1]{Nguyen An Khanh}
+\author[1,*]{Ta Thi Kim Hue}
+\authornote{1}{Hanoi University of Science and Technology, Hanoi, Vietnam}
+\authornote{*}{Corresponding author email: hue.tathikim@hust.edu.vn}
+
+% Abstract
+\begin{abstract}
+The secure transmission of DICOM medical images across hospital intranet infrastructure demands mechanisms that simultaneously protect patient privacy and provide cryptographically verifiable assurance of transmission integrity.
+Existing steganographic approaches for medical imaging either sacrifice clinical visual fidelity through transform-domain embedding or lack any mechanism for a receiving PACS node to confirm that the embedding was executed correctly without decrypting the hidden payload.
+This paper proposes a verifiable DICOM steganography framework that integrates three cooperating layers: (i)~a DICOM preprocessing pipeline that extracts native 16-bit grayscale pixel arrays and serializes all metadata tags into a gzip-compressed structured payload, preserving the full 65,536-level diagnostic intensity range; (ii)~chaos-controlled LSB embedding restricted exclusively to the \emph{border zone} of the Region of Interest---the outermost 10-pixel ring of tissue surrounding the diagnostic core---coupled with Reversible Data Hiding (RDH) so that the authorized verifier can restore exact original pixel values after extraction at diagnostic-core and metadata-region positions; and (iii)~a Groth16 zk-SNARK that attests, in zero knowledge, that a valid chaos-controlled embedding consistent with a committed SHA-256 fingerprint was executed, underpinned by a dual-key architecture that separates public proof auditability from private payload access.
+The circuit comprises 18,429~R1CS constraints on a pot16 trusted setup (28.1\% utilisation), with per-proof overhead of approximately 1.04\,KB and Groth16 verification completing in 1--3\,ms (cryptographic core) using only a 4.5\,KB verification key.
+Embedding modifies at most $\pm 3$ out of 65,535 intensity levels upon embedding; residual distortion after RDH restoration is exactly zero at diagnostic-core and metadata-region data positions (see Section~\ref{sec:security-analysis} for the limited exception at proof-undo positions).
+Benchmarking across three MR T1 phantom DICOM images yields PSNR $\approx$103.38\,dB, SSIM $= 1.000000$, MSE $\approx 0.197$, and Jensen-Shannon divergence $\mathrm{JSD} < 5\times10^{-4}$; quantitative results are reported in Section~4.
+\end{abstract}
+
+% Keywords
+\keyword{DICOM medical image security}
+\keyword{Chaos-based steganography}
+\keyword{Zero-knowledge proofs}
+\keyword{zk-SNARKs}
+\keyword{Verifiable embedding integrity}
+\keyword{Hospital network security}
+
+% Bibliography
+\addbibresource{refs.bib}
+
+% Other settings
+\usepackage{graphicx,subfigure}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage{pifont}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{color}
+\usepackage[T1]{fontenc}
+\newcommand{\eoproof}{\hfill $\square$}
+\newtheorem{theorem}{\bf Theorem}[section]
+\newtheorem{definition}{\bf Definition}[section]
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+\usepackage{xcolor}
+\definecolor{customgray}{gray}{0.9}
+\usepackage{tabularx}
+
+\lstset{basicstyle=\ttfamily}
+\let\Code\lstinline
+
+\usepackage{prettyref}
+\newrefformat{fig}{Fig.\,\ref{#1}}
+\newrefformat{tab}{Table.\,\ref{#1}}
+\newrefformat{sec}{Section \ref{#1}}
+\newrefformat{subsec}{Section \ref{#1}}
+\newrefformat{subsubsec}{Section \ref{#1}}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+The healthcare sector generates enormous volumes of medical imagery daily in the Digital Imaging and Communications in Medicine (DICOM) format~\cite{b14}.
+DICOM files encode not only the pixel data of radiological scans---X-ray, CT, MRI, and ultrasound---but also sensitive patient metadata (patient identifier, study date, imaging parameters, and diagnostic annotations) embedded as structured tags.
+When these files transit intra-hospital infrastructure such as a Picture Archiving and Communication System (PACS), Ethernet LAN segments, or legacy CAN-bus-connected diagnostic equipment, two orthogonal security requirements arise simultaneously: \emph{privacy}, so that unauthorized observers cannot read or reconstruct patient records, and \emph{verifiable integrity} of transmission, so that receiving nodes can confirm that the image packet has not been modified in transit and that the payload was embedded in accordance with the prescribed protocol---without being forced to decrypt or expose the protected content.
+
+Steganography addresses the privacy requirement by hiding information inside the carrier image itself, so that an observer perceives only an ordinary medical scan.
+Spatial-domain LSB substitution is particularly attractive in clinical contexts because it incurs minimal perceptual distortion, keeping PSNR well above the diagnostic-quality lossless threshold~\cite{b15}.
+To resist steganalytic detection, a substantial line of work pseudo-randomizes embedding positions using chaotic maps---notably Arnold's Cat Map (ACM) and the Logistic map---whose extreme sensitivity to initial conditions and mixing behavior make the scatter of modified pixels computationally unpredictable to an adversary without the key~\cite{b3,b4,b5}.
+In the medical domain, such chaos-based schemes have been applied to DICOM and other clinical images~\cite{b4}, demonstrating that bit-plane embedding can achieve imperceptible distortion.
+However, none of these works provide a mechanism for a receiving PACS node to \emph{verify}, in a privacy-preserving and non-interactive manner, that the embedding was genuinely executed under the prescribed chaos parameters---a property we refer to as \emph{computational integrity of embedding}.
+
+A further clinical concern is the diagnostic inviolability of the pixel record.
+Existing chaos-based steganographic systems scatter modified pixels across the entire Region of Interest, embedding data into the same tissue regions used for diagnosis, which is incompatible with clinical regulations treating DICOM images as legal medical records~\cite{b14}.
+Even when the distortion per pixel is small, any irreversible modification of diagnostic tissue violates lossless-archival requirements under standards such as HIPAA and the DICOM standard~\cite{b14}; the DICOM standard in particular mandates lossless transfer syntax for archival use.
+
+The gap between \emph{concealment} and \emph{verifiable correctness} is critical in hospital networks.
+A passive adversary can replace a legitimately embedded stego-image with a crafted one that carries malformed or falsified metadata while looking visually identical.
+Without an integrity proof, the verifier has no cryptographic recourse.
+Digital signatures can authenticate the sender's identity, but they do not prove that a specific algorithmic procedure was followed nor that the embedded content is consistent with the prescribed chaos-controlled embedding parameters.
+Zero-knowledge proof (ZKP) systems, introduced by Goldwasser, Micali, and Rackoff~\cite{b7}, enable a prover to convince a verifier that a computation was executed correctly, without revealing any information beyond the validity of the claim.
+The subsequent development of non-interactive ZKP systems via the Fiat-Shamir transform and the common reference string model made such proofs practical for asynchronous settings; the Groth16 construction~\cite{b8} brought the proof size down to a constant of three elliptic-curve group elements on the BN254 curve regardless of circuit size, with a single pairing-based verifier---properties ideally suited to constrained network nodes.
+The combination of steganography with ZKP for ownership-style attestation was explored by Toso and Chung~\cite{b6}, but their Schnorr-based approach proves possession of a signing key (an identity claim) rather than computational integrity of the embedding procedure, and does not address the DICOM pipeline or the requirement that a single image carry all verification material.
+
+\textbf{This paper closes these gaps} by proposing a verifiable DICOM
+steganographic framework with four tightly integrated innovations:
+
+\begin{enumerate}
+  \item \textbf{DICOM-native 16-bit pipeline.}
+    A structured pipeline reads a DICOM file, extracts the native 16-bit
+    grayscale pixel array (preserving all 65,536 intensity levels required
+    for clinical diagnosis), and serializes all text and numeric DICOM tags
+    into a gzip-compressed binary payload.
+    No 8-bit downscaling is performed; the output PNG carrier retains full
+    diagnostic fidelity.
+
+  \item \textbf{Border-zone chaos LSB embedding with RDH.}
+    The metadata payload and ZK proof are embedded exclusively in the
+    \emph{border zone} of the Region of Interest: the outermost 10-pixel
+    ring of tissue, computed by morphological erosion of the ROI mask.
+    Diagnostic core tissue is never modified.
+    Reversible Data Hiding (RDH) is applied so that the authorized verifier
+    can restore exact original pixel values at diagnostic-core and metadata-region positions after extraction (see Section~\ref{sec:security-analysis}).
+
+  \item \textbf{Dual-key steganographic architecture.}
+    Two independent chaos trajectories drive two independent pixel regions.
+    A public \emph{proof key} allows any PACS auditor to locate and verify
+    the embedded ZK proof without accessing patient data.
+    A private \emph{chaos key}, pre-shared once during system setup,
+    allows authorized recipients to extract the metadata; the key is never
+    stored in or transmitted with the image.
+
+  \item \textbf{Groth16 zk-SNARK attestation.}
+    Following metadata embedding, the prover generates a Groth16 proof
+    attesting, in zero knowledge, that a chaos-controlled embedding
+    consistent with a committed SHA-256 fingerprint was executed.
+    The circuit comprises 18,429~constraints on a pot16 trusted setup
+    (28.1\% utilisation).
+    The proof ($\approx 0.96$\,KB serialized), together with public signals
+    and a compact 84-byte header (1.04\,KB total embedded block), is stored entirely in pixel LSBs
+    of the proof-key region.
+    A public auditor holding only the received stego-image and the
+    4.5\,KB pre-installed verification key can execute the full Groth16
+    pairing check in 1--3\,ms, entirely without accessing the hidden
+    DICOM metadata.
+\end{enumerate}
+
+At a high level, the Groth16 instance proves an existential statement of the form:
+\begin{equation}
+\begin{split}
+\exists\; (\mathbf{m}_{32},\, K_{\text{chaos}},\, \rho,\, s,\, \eta,\, x_0,\, y_0,\, P,\, \mathbf{h}_{\text{img,priv}})\quad \text{s.t.}\\
+C_{\text{pub}} = \mathsf{Poseidon}(\mathbf{m}_{32},\; K_{\text{chaos}},\; \rho) \\
+\wedge\quad \mathbf{h}_{\text{img}} = \mathrm{split}_8\!\left(\mathrm{SHA\text{-}256}(I)\right) \\
+\wedge\quad N_{\text{pub}} = \mathsf{Poseidon}(s,\; \eta) \\
+\wedge\quad P = \mathsf{ACM}^{16}(x_0,\; y_0,\; K_{\text{chaos}}) \\
+\wedge\quad \forall\, p \in P:\; p \in [0,W)\times[0,H),
+\end{split}
+\label{eq:zkstatement}
+\end{equation}
+where $I$ is the original cover image (before embedding), $\mathbf{m}_{32}$ is the first 32~bits of SHA-256 of the gzip-compressed metadata payload, $P$ is the set of 16~embedding positions proven by the circuit, and $\mathbf{h}_{\text{img}}$ is the SHA-256 digest of the cover image split into eight BN254 field elements.
+Because the cover image hash is computed before embedding begins, the verifier cannot independently recompute it from the received stego image; instead, $\mathbf{h}_{\text{img}}$ is read from the \texttt{public.json} embedded in the stego image and supplied as a public input to the pairing check.
+The verifier reconstructs $(C_{\text{pub}}, \mathbf{h}_{\text{img}}, N_{\text{pub}})$ from the proof-key header and the embedded public signals, then executes the pairing check.
+Any pixel modification, metadata alteration, or schedule substitution causes the public inputs to deviate from the committed values and the check to fail, providing tamper detection without payload disclosure.
+
+Groth16 requires a per-circuit trusted setup.
+The circuit is kept compact (18,429 constraints) and uses a pot16 Powers-of-Tau ceremony that supports up to $2^{16}=65{,}536$ constraints.
+The verification key (4.5\,KB) is distributed out-of-band to all PACS nodes once; thereafter, verification is repeated at negligible cost per received image.
+
+\textbf{Contributions.}
+The principal contributions of this paper are:
+\begin{itemize}
+  \item A DICOM-native 16-bit steganographic pipeline that preserves the full diagnostic intensity range and serializes all DICOM metadata tags into a single gzip-compressed payload, producing a 16-bit grayscale PNG stego-image as the sole output artifact.
+
+  \item A border-zone embedding strategy---restricting modifications to the outermost 10-pixel ROI ring via morphological erosion---combined with Reversible Data Hiding that guarantees exact recovery of diagnostic-core and metadata-region pixels after authorized extraction, satisfying clinical lossless-archival requirements.
+
+  \item A dual-key steganographic architecture that decouples public proof auditability (proof key) from private metadata access (chaos key), enabling lightweight PACS-node verification without exposing patient data.
+
+  \item To the best of the authors' knowledge, the first non-interactive, zero-knowledge proof of computational embedding integrity for a DICOM medical steganography system, implemented as a Groth16 circuit with 18,429~constraints, distinguishing correctness attestation from the ownership attestation of prior ZKP-steganography work~\cite{b6}.
+
+  \item A self-contained single-image verification protocol in which all proof material resides in pixel LSBs, enabling 1--3\,ms PACS-node verification with no auxiliary files and sub-2\,KB proof overhead.
+\end{itemize}
+
+The remainder of this paper is organized as follows.
+\prettyref{sec:relatedwork} surveys related work on medical image steganography and ZKP-based integrity schemes.
+\prettyref{sec:methodology} presents the proposed framework.
+Experimental results and evaluation are given in \prettyref{sec:results}.
+\prettyref{sec:conclusion} concludes.
+
+\section{Related Work}
+\label{sec:relatedwork}
+
+\subsection{Medical Image Steganography: LSB and Transform-Domain Methods}
+
+Spatial-domain LSB techniques represent the oldest and simplest class of image steganography and remain widely used in medical settings due to their low computational cost and negligible perceptual distortion at low payload rates~\cite{b15}.
+Rahman~et~al.~\cite{b13} proposed an LSB method augmented with a Magic Matrix permutation and multi-level encryption, reporting PSNR values of 75.3--83.3\,dB on $512\times512$ images.
+While the PSNR values are competitive, this scheme provides no proof of embedding correctness and no mechanism for a third party to verify that the prescribed algorithm was followed.
+
+Ramyashree~et~al.~\cite{b10} proposed a hybrid LSB/DCT framework designed specifically for embedding audio data into DICOM images.
+Their DCT-based embedding achieves PSNR of 57.89\,dB under standard conditions, which drops to approximately 47\,dB under compression stress testing.
+Although this work is directly DICOM-aware, the DCT transform inherently introduces spectral modifications, and the system provides no embedding integrity proof.
+
+The EPR-Stego framework of Safitri~et~al.~\cite{b12} targets Electronic Patient Record embedding using an Integer Wavelet Transform combined with Arithmetic Coding and encryption.
+Reported PSNR values range from 51.71 to 75.59\,dB.
+Transform-domain methods modify frequency coefficients in ways that can interfere with clinical image analysis pipelines, and no mechanism for verifiable embedding correctness is provided.
+
+\subsection{Lightweight Crypto-Steganographic Frameworks for Medical IoT}
+
+The integration of cryptography with steganography has been studied for IoT healthcare deployments where both computational resources and bandwidth are constrained.
+Sethi~et~al.~\cite{b11} combined 2-D DWT embedding with ChaCha20 symmetric encryption and Elliptic Curve Cryptography for key management, targeting resource-limited medical IoT devices.
+Their system addresses \emph{data confidentiality} rather than \emph{proof of embedding correctness}: the verifier must decrypt and reconstruct the hidden data to check its integrity, violating the zero-knowledge requirement.
+
+\subsection{Chaos-Based Steganography}
+
+Arnold's Cat Map (ACM) and related two-dimensional chaotic maps have been widely adopted for pseudo-randomizing embedding positions in image steganography.
+Mishra~et~al.~\cite{b3} demonstrated that applying ACM to determine insertion positions achieves high security and capacity in LSB substitution.
+Hue~et~al.~\cite{b4}---including members of the present authorship group---extended chaos-based steganography to the medical domain, embedding patient records in the LSB bit-planes of DICOM images using combined Logistic and Cat map position selection. The current work extends this approach by adding the border-zone constraint, RDH reversibility, and ZK attestation.
+Both papers establish the technical basis for the chaos-controlled embedding module of the present work.
+However, neither provides a zero-knowledge mechanism for a verifier to authenticate the embedding without access to the secret embedding key and, consequently, to the hidden payload; and neither restricts embedding to non-diagnostic pixel regions.
+Neither work addresses steganalysis resistance; the proposed system deters structural steganalysis by restricting modified pixels to the border zone (at most 19.9\% of pixels) and limiting modifications to the 2 LSBs, keeping first- and second-order statistical properties of the image close to those of the cover.
+
+\subsection{Zero-Knowledge Proofs in Steganography}
+
+The use of ZKP in steganographic contexts was explored by Toso and Chung~\cite{b6}, who combined an interactive Schnorr zero-knowledge protocol with spatial-domain steganography to embed and prove a digital signature in an image.
+Their goal is ownership attestation: the ZKP convinces a verifier that the prover possesses the private signing key corresponding to a public key embedded in the image.
+This is fundamentally an \emph{identity claim}, not a proof that a specific embedding algorithm was executed correctly under agreed parameters.
+Furthermore, the Schnorr protocol is interactive and does not natively support the non-interactive setting required for asynchronous PACS verification, and it addresses general digital images rather than DICOM medical data.
+
+More recent proof systems such as PLONK~\cite{b9}---which requires only a universal, circuit-independent trusted setup---and STARKs---which require no trusted setup at all---reduce or eliminate the per-circuit ceremony required by Groth16, at the cost of larger proof sizes (tens of kilobytes rather than $\approx$1.04\,KB).
+For the constrained pixel LSB channel used in this work, the compact constant proof size of Groth16 is a decisive advantage; replacing Groth16 with a universal or transparent scheme is an identified avenue for future work once the trusted-setup limitation becomes a deployment concern.
+
+\subsection{Positioning of the Proposed Work}
+
+Table~\ref{tab:related} summarizes the key properties of related approaches.
+To the best of the authors' knowledge, the proposed framework is the first system to simultaneously achieve (a)~DICOM-native metadata embedding with a 16-bit preprocessing pipeline, (b)~clinical-grade reversibility via RDH so that diagnostic tissue is exactly preserved after extraction, (c)~a non-interactive, zero-knowledge proof of computational embedding integrity (Groth16), and (d)~a dual-key architecture enabling public proof auditability without metadata exposure.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+\caption{Comparison of Related Medical Image Steganography Works}
+\label{tab:related}
+\begin{tabularx}{\columnwidth}{@{}l >{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X@{}}
+\toprule
+\textbf{Work} & \textbf{PSNR (dB)} & \textbf{DICOM} & \textbf{Integrity Proof} & \textbf{ZK} & \textbf{RDH} \\
+\midrule
+Rahman et al.~\cite{b13}    & 75--83 & \ding{55} & \ding{55} & \ding{55} & \ding{55} \\
+Ramyashree et al.~\cite{b10} & 47--58 & \ding{51} & \ding{55} & \ding{55} & \ding{55} \\
+EPR-Stego~\cite{b12}        & 52--76 & \ding{55} & \ding{55} & \ding{55} & \ding{55} \\
+Sethi et al.~\cite{b11}     & $\sim$40+ & \ding{55} & \ding{55} & \ding{55} & \ding{55} \\
+Hue et al.~\cite{b4}        & ---   & \ding{51} & \ding{55} & \ding{55} & \ding{55} \\
+Toso \& Chung~\cite{b6}     & ---   & \ding{55} & identity & \ding{51} & \ding{55} \\
+\textbf{Proposed}           & \textbf{TBD} & \ding{51} & \textbf{embedding} & \ding{51} & \ding{51} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Proposed System Architecture}
+\label{sec:methodology}
+
+Table~\ref{tab:notation} summarizes the notation used throughout this section.
+Groth16---a member of the zk-SNARK family---is chosen for its compact three-element proof structure and single pairing-based verifier, minimizing the pixel LSB payload required to carry the serialized proof within the stego-image.
+
+\subsection{System Overview}
+
+The framework operates as a sender--receiver protocol over a PACS or hospital LAN channel.
+\prettyref{fig:system-model} illustrates the two-sided architecture.
+
+\textbf{Prover (sender) side.}
+Given a DICOM file, the system (i)~extracts the native 16-bit pixel array and all text/numeric metadata tags, (ii)~gzip-compresses the tag payload and generates a 32-bit SHA-256 fingerprint, (iii)~detects the border zone of the Region of Interest by morphological erosion of the ROI mask, (iv)~generates four non-overlapping position sets in the border zone driven by the two chaos keys, (v)~embeds in order: metadata-undo bits and metadata bits into the chaos-key region; (vi)~invokes the Groth16 prover to generate the validity proof; and (vii)~embeds the 84-byte ZKDC header and the ZK proof/public signals into the proof-key region via RDH.
+The sole output artifact is a 16-bit grayscale PNG stego-image.
+
+\textbf{Verifier (receiver) side.}
+The protocol supports two verification roles.
+A \emph{public auditor} requires only the stego-image and the pre-installed 4.5\,KB verification key: it locates the proof header via the public proof key, extracts the Groth16 proof and public signals from pixel LSBs, and executes the pairing check---without accessing any patient data.
+An \emph{authorized recipient} additionally uses the pre-shared private chaos key to extract and decompress the metadata payload, validate its SHA-256 integrity, and invoke RDH pixel restoration to recover exact original pixel values at diagnostic-core and metadata-region positions (see Section~\ref{sec:security-analysis}).
+
+% ==========================================
+% SYSTEM ARCHITECTURE
+% ==========================================
+\begin{figure*}[htbp]
+\centering
+\begin{tikzpicture}[
+    >=Stealth,
+    % Custom arrow style to prevent touching the boxes (adds a 2pt gap at both ends)
+    arrow/.style={->, thick, shorten >= 2pt, shorten <= 2pt},
+    % Slightly taller boxes for better text fit
+    basebox/.style={draw=black, thick, align=center, rounded corners=3pt, minimum width=4.8cm, minimum height=1.2cm, text width=4.5cm, font=\footnotesize},
+    box/.style={basebox, fill=blue!5},
+    highlight/.style={basebox, fill=green!5},
+    imgnode/.style={align=center, font=\footnotesize\bfseries}
+]
+
+% ================= HEADERS =================
+\node[font=\large\bfseries] (sender_lbl) at (0, 2.5) {Sender (Prover Node)};
+\node[font=\large\bfseries] (receiver_lbl) at (7.5, 2.5) {Receiver (Verifier Node)};
+
+% ================= SENDER SIDE (LEFT COLUMN: TOP TO BOTTOM) =================
+% Y-coordinates expanded to give arrows more physical length
+\node[imgnode] (dicom_in) at (0, 1.0) {\includegraphics[width=1.2cm]{figs/dicom_fileicon.jpg}\\[3pt]Original DICOM File\\(Pixels \& Metadata)};
+
+\node[box] (prep) at (0, -1.8) {\textbf{1. Prepare Data}\\Extract Pixels \& Compress Metadata};
+\node[box] (bz) at (0, -3.6) {\textbf{2. Find Embedding Zone}\\Choose Least Entropy Pixels};
+\node[box] (chaos) at (0, -5.4) {\textbf{3. Chaos Positioning}\\Using Arnold's Cat Map + Logistic Map};
+\node[box] (embed) at (0, -7.2) {\textbf{4. ZK Prove \& Embed}\\Generate Proof \& Hide Data Losslessly};
+
+\node[imgnode] (stego) at (0, -10.0) {\includegraphics[width=2.0cm]{figs/dicom_test.png}\\[3pt]Stego-Image\\(16-bit PNG)};
+
+% Sender Arrows (Using the new 'arrow' style)
+\draw[arrow] (dicom_in.south) -- (prep.north);
+\draw[arrow] (prep.south) -- (bz.north);
+\draw[arrow] (bz.south) -- (chaos.north);
+\draw[arrow] (chaos.south) -- (embed.north);
+\draw[arrow] (embed.south) -- (stego.north);
+
+% ================= NETWORK TRANSMISSION (BOTTOM: LEFT TO RIGHT) =================
+\draw[arrow] (stego.east) -| node[pos=0.25, above, font=\footnotesize\bfseries] {Transmit via LAN/Wireless} (7.5, -8.0);
+
+% ================= RECEIVER SIDE (RIGHT COLUMN: BOTTOM TO TOP) =================
+\node[highlight] (auditor) at (7.5, -7.2) {\textbf{I. Proof Verification (Public Auditor)}\\Extract \& Verify ZK Proof\\ \textit{(Requires verification key)}};
+
+\node[highlight, fill=yellow!5] (recipient) at (7.5, -3.6) {\textbf{II. Metadata Extraction (Authorized Recipient)}\\Extract Metadata \& Restore Pixels\\ \textit{(Requires chaos key)}};
+
+\node[imgnode] (dicom_out) at (7.5, 1.0) {\includegraphics[width=1.2cm]{figs/dicom_fileicon.jpg}\\[3pt]Exactly Restored DICOM\\(Pixels \& Metadata)};
+
+% Receiver Arrows
+\draw[arrow] (auditor.north) -- node[right, font=\scriptsize, text=green!50!black] {\textbf{If PASS: Accept}} (recipient.south);
+\draw[arrow] (recipient.north) -- (dicom_out.south);
+
+\end{tikzpicture}
+\caption{System architecture.}
+\label{fig:system-model}
+\end{figure*}
+% ==========================================
+% SYSTEM ARCHITECTURE - END
+% ==========================================
+
+\begin{table}[htbp]
+\centering\small
+\caption{Notation and Parameters}
+\label{tab:notation}
+\begin{tabularx}{\columnwidth}{@{}l X@{}}
+\toprule
+\textbf{Symbol} & \textbf{Description} \\
+\midrule
+$I$ & Original 16-bit DICOM pixel array \\
+$\tilde{I}$ & Stego image (after embedding) \\
+$\hat{I}$ & Restored image (after RDH extraction) \\
+$z$ & Wire vector $(1, \mathbf{a}, \mathbf{w})$; $\mathbf{a}$ public, $\mathbf{w}$ witness \\
+$A, B, C$ & Matrices defining the R1CS \\
+$u_i, v_i, w_i$ & QAP selector polynomial families \\
+$t(X),\, h(X)$ & QAP target and quotient polynomials \\
+$(\pi_A, \pi_B, \pi_C)$ & Groth16 proof ($G_1 \times G_2 \times G_1$) \\
+$vk_\alpha, vk_\beta, vk_\gamma, vk_\delta$ & Verification key elements from CRS \\
+$W,\, H$ & Image width and height in pixels \\
+$(x, y)$ & Pixel coordinates; $i_k = y_k W + x_k$ linear index \\
+$\mathcal{B}$ & Boolean border-zone mask (\prettyref{subsec:borderzone}) \\
+$M_e$ & Erosion iterations ($M_e = 10$) \\
+$\mathbf{m}_{32}$ & 32-bit message: first 32~bits of SHA-256(gzip(metadata)) \\
+$K_{\text{chaos}}$ & Private chaos key (numeric) \\
+$\rho,\, s,\, \eta$ & Commitment randomness; nullifier secret and nonce \\
+$C_{\text{pub}}$ & $\mathsf{Poseidon}(\mathbf{m}_{32}, K_{\text{chaos}}, \rho)$ \\
+$N_{\text{pub}}$ & $\mathsf{Poseidon}(s, \eta)$ \\
+$\mathbf{h}_{\text{img}}$ & SHA-256(cover image) in 8 BN254 field elements \\
+$r$ & Logistic map parameter, $r \in (3.57,\, 4]$ \\
+$v,\, v'$ & Original / modified pixel value, $v \in [0,\, 65535]$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{DICOM Preprocessing Pipeline}
+
+A DICOM file packages a pixel array and structured metadata tags under a common binary container.
+The preprocessing module performs the following steps:
+
+\textbf{Pixel extraction.}
+The pixel array is read via standard DICOM tag parsing and preserved at native bit depth (typically 16-bit per pixel).
+Signed 16-bit arrays (e.g., CT Hounsfield units stored as \texttt{int16}) are converted to unsigned representation by adding 32,768:
+\begin{equation}
+v_{\text{uint16}} =
+\begin{cases}
+v_{\text{int16}} + 32768 & \text{if signed modality (CT)} \\
+v_{\text{int16}}         & \text{if unsigned modality (MR, CR)}
+\end{cases}
+\label{eq:uint16}
+\end{equation}
+This preserves all 65,536 intensity levels required for diagnostic-quality soft-tissue contrast, Hounsfield values, and T1/T2 signal ratios.
+Because typical Hounsfield units range between $-1{,}024$ and $+3{,}000$, shifting by 32,768 safely maps all clinical values into the middle of the \texttt{uint16} range with no overflow risk.
+No downscaling to 8-bit is performed; the output carrier is a 16-bit grayscale PNG, which is the only output artifact.
+
+\textbf{Metadata serialization.}
+All text and numeric DICOM tags are serialized to a JSON dictionary.
+Binary blob types (VR codes \texttt{OB}, \texttt{OW}, \texttt{OF}, \texttt{UN}) and nested sequence types (\texttt{SQ}) are excluded; binary types cannot be represented as plain text, and sequence types require recursive tag parsing beyond the scope of the flat JSON serialization used here.
+In the MRI test case used in this work, serialization yields 294 tags, compressing from $\approx$8\,KB raw JSON to $\approx$2.5\,KB after gzip; tag counts and compression ratios vary by modality and scanner.
+The SHA-256 hash of the compressed payload forms the integrity fingerprint stored in the 84-byte header.
+
+\subsection{Dual-Key Steganographic Architecture}
+
+Two independent chaos trajectories drive two independent, non-overlapping regions of the border zone.
+Each key string is first converted to a numeric seed via HMAC-SHA256 followed by normalization to $(0, 1)$, producing a floating-point value that initializes the chaos trajectory for that key's region.
+
+\textbf{Proof key} (public; default value: \texttt{"zkdicom\_proof\_key\_v1"}).
+This key is fixed and publicly known.
+It determines the positions of the \emph{proof-key region}, which stores the 84-byte ZKDC header, the serialized \texttt{proof.json} ($\approx$1.1\,KB, upper bound), and the serialized \texttt{public.json} ($\approx$830\,B, upper bound); the measured embedded block is $\approx$1.04\,KB total (Table~\ref{tab:quality-full}).
+Any party that knows the proof key can locate and verify the embedded Groth16 proof without any knowledge of the private chaos key and, consequently, without accessing any patient metadata.
+
+\textbf{Chaos key} (private; pre-shared once during setup).
+This key is chosen by the sender, shared with the authorized recipient once during system initialization, and never transmitted again.
+It determines the positions of the \emph{chaos-key region}, which stores the gzip-compressed DICOM metadata.
+Only the SHA-256 hash of the chaos key is stored in the ZKDC header, allowing the recipient to validate the key before attempting extraction.
+The key itself is never stored in or transmitted with the stego-image after the one-time setup.
+
+This separation means that the proof-key and chaos-key regions are independently readable and independently verifiable, with no positional overlap and no cryptographic dependency between them.
+
+\subsection{Border Zone Detection}
+\label{subsec:borderzone}
+
+To satisfy clinical lossless requirements, embedding is restricted to the \emph{border zone} of the ROI: the outermost pixels of the tissue region, not the diagnostically critical core.
+Let $I$ denote the 16-bit pixel array.
+The border zone mask $\mathcal{B}$ is computed as:
+\begin{equation}
+\mathcal{B} = \mathrm{ROI}(I) \;\setminus\; \mathrm{erode}\!\left(\mathrm{ROI}(I),\; M_e\right),
+\label{eq:borderzone}
+\end{equation}
+where $\mathrm{ROI}(I) = \{(x,y) : (I_{xy} \mathbin{\&} \mathtt{0xFFFC}) > \tau\}$, $\tau = \mathrm{percentile}(I \mathbin{\&} \mathtt{0xFFFC},\; 5\%)$ is the 5th-percentile intensity threshold separating tissue from background, $\mathrm{erode}(\cdot, M_e)$ denotes $M_e$ iterations of morphological binary erosion, and $M_e = 10$ pixels.
+The choice $M_e = 10$ provides a ring wide enough to carry the required payload (approximately 144,400 pixels in a $512\times512$ MRI slice) while remaining narrower than typical radiological margin conventions ($\geq 15$--20 pixel safety margins in tumor delineation), ensuring that embedding is confined to peripheral tissue boundaries rather than any diagnostically assessed region.
+
+The masking operation $I \mathbin{\&} \mathtt{0xFFFC}$ strips the two least significant bits before thresholding.
+This ensures the ROI boundary is computed on stable intensity values: since LSB embedding only modifies bits~0 and~1, the masked array is identical on the original and the stego image, guaranteeing that $\mathcal{B}$ is reproducible without the original file.
+
+For a representative 512$\times$512 MRI slice, \eqref{eq:borderzone} yields approximately 144,432 border-zone pixels (55.1\% of the image), of which 28,800 are consumed by data and undo embedding, corresponding to 19.9\% border-zone utilisation.
+The diagnostic core (eroded ROI) is never touched.
+
+The protocol imposes a minimum border-zone capacity requirement: embedding two key regions with RDH requires at least $2 \times (N_{\text{proof}} + N_{\text{meta}}) = 28{,}800$ border-zone pixels for the representative payload sizes of \prettyref{subsec:rdh}.
+For smaller images or tight ROI geometries (e.g., zoomed-in organ scans where the border ring is narrow), the available border-zone pixel count may fall below this threshold.
+In such cases the system rejects the embedding with an explicit capacity error and does not produce a stego output, preventing silent truncation of the proof or metadata payload.
+Operators should verify that $|\mathcal{B}| \geq 2(N_{\text{proof}} + N_{\text{meta}})$ before deployment on non-standard DICOM modalities; for $256\times256$ images a narrower ROI or reduced metadata payload may be required.
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
+    \small\textit{[FIGURE PLACEHOLDER --- Fig.~2: Border Zone Illustration]}\\[4pt]
+    Three-panel figure from a representative DICOM slice (e.g., 1-04.dcm).\\
+    (a) Original 16-bit grayscale image.\\
+    (b) ROI mask (white = tissue, black = background air).\\
+    (c) Border zone highlighted (colored ring) showing the outermost 10-pixel
+    ring; the diagnostic core is visible as the darker unlabelled interior.\\
+    Demonstrates that core brain/organ tissue is never modified.
+    \vspace{2.5cm}}}
+    \caption{Border zone detection. The embedding target is restricted to the
+    outermost $M_e=10$ pixel ring of the Region of Interest, computed by
+    morphological erosion. Core diagnostic tissue (inner ROI) is never
+    modified.}
+    \label{fig:border-zone}
+\end{figure}
+
+\subsection{Chaos-Controlled Position Generation}
+
+Within the border zone, embedding positions for each of the four regions (proof\_data, proof\_undo, meta\_data, meta\_undo) are generated by an Arnold's Cat Map walk seeded from the respective chaos key.
+
+\textbf{Arnold's Cat Map.}
+Starting from an initial coordinate $(x_0, y_0)$ selected from the highest-gradient region of the cover image (to minimize perceptual distortion at the starting point) and perturbed by the chaos key via modular arithmetic, each subsequent position is given by:
+\begin{equation}
+\begin{bmatrix} x_{i+1} \\ y_{i+1} \end{bmatrix}
+=
+\begin{bmatrix} 2 & 1 \\ 1 & 1 \end{bmatrix}
+\begin{bmatrix} x_i \\ y_i \end{bmatrix}
+\bmod \begin{bmatrix} W \\ H \end{bmatrix}.
+\label{eq:acm}
+\end{equation}
+Each $(x_k, y_k)$ maps to a linear index $i_k = y_k \cdot W + x_k$.
+Positions not in the border zone mask $\mathcal{B}$ are rejected and the walk continues; collisions are excluded by maintaining a per-region exclusion set.
+
+\textbf{Logistic map perturbation.}
+A Logistic map is iterated as a pre-step before the ACM walk to perturb the starting coordinates $(x_0, y_0)$:
+\begin{equation}
+x_{n+1} = r \, x_n (1 - x_n), \qquad x_n \in (0,1),\quad r \in (3.57,\, 4],
+\label{eq:logistic}
+\end{equation}
+operating in the full chaos regime.
+The Logistic output is scaled to integer pixel coordinates and added (modulo image dimensions) to the image-derived initial coordinate before \eqref{eq:acm} is applied; this perturbed starting point increases sensitivity to the key value and reduces regularity in the position sequence.
+
+\textbf{LSB embedding.}
+For a 16-bit pixel value $v$ and a 2-bit payload word $b \in \{0, 1, 2, 3\}$, the embedding operation is:
+\begin{equation}
+v' = (v \mathbin{\&} \mathtt{0xFFFC}) \mathbin{|} b,
+\label{eq:lsb16}
+\end{equation}
+which replaces only the two least significant bits.
+The maximum per-pixel distortion is $|v' - v| \leq 3$, or $3 / 65535 \approx 0.005\%$ of the full intensity range.
+
+\textbf{Entropy-guided placement (metadata only).}
+For the chaos-key region, border-zone pixels are sorted by ascending local variance (computed on $I \mathbin{\&} \mathtt{0xFFFC}$, i.e., with the 2 LSBs masked out) to form an ordered pool; the ACM walk then selects embedding positions from this pool.
+This steers metadata bits preferentially toward low-variance (smooth) border-zone pixels, minimizing statistical detectability.
+Reproducibility is guaranteed by a correctness invariant: because the sort key uses $I \mathbin{\&} \mathtt{0xFFFC}$ (not the raw pixel value), the sort order is determined solely by intensity values above bit 1, which are identical on the original and stego images (LSB embedding only modifies bits 0 and 1).
+The verifier therefore derives the same sorted position list from the stego image without requiring the original.
+
+\subsection{Reversible Data Hiding}
+\label{subsec:rdh}
+
+Each of the two key regions employs a \emph{two-sub-region} RDH scheme.
+For a region with $N$ data positions, an equal number of undo positions is derived from the same chaos trajectory but with the data positions added to the exclusion set.
+
+Let $\mathcal{D} = \{d_1, \ldots, d_N\}$ and
+$\mathcal{U} = \{u_1, \ldots, u_N\}$ denote the data and undo positions
+respectively, with $\mathcal{D} \cap \mathcal{U} = \varnothing$.
+
+\textbf{Embedding.}
+\begin{align}
+\tilde{I}[u_i] &= (I[u_i] \mathbin{\&} \mathtt{0xFFFC}) \mathbin{|} (I[d_i] \mathbin{\&} \mathtt{0x0003}), \label{eq:rdh-undo}\\
+\tilde{I}[d_i] &= (I[d_i] \mathbin{\&} \mathtt{0xFFFC}) \mathbin{|} b_i, \label{eq:rdh-data}
+\end{align}
+where $b_i$ is the 2-bit payload word for position $i$.
+That is, the original 2 LSBs of each data pixel are saved into the corresponding undo pixel before the data pixel is overwritten.
+
+\textbf{Restoration.}
+After extraction and integrity verification:
+\begin{equation}
+\hat{I}[d_i] = (\tilde{I}[d_i] \mathbin{\&} \mathtt{0xFFFC}) \mathbin{|}
+               (\tilde{I}[u_i] \mathbin{\&} \mathtt{0x0003}),
+\label{eq:rdh-restore}
+\end{equation}
+recovering the exact original 2 LSBs of every data position.
+The restored image $\hat{I}$ is pixel-identical to the original $I$ at all data positions: $\hat{I}[d_i] = I[d_i]$ for all $i$ (assuming undo-pixel integrity; see Section~\ref{sec:security-analysis} for the limited exception at proof-undo positions).
+
+The undo positions $\mathcal{U}$ are permanently modified by at most $\pm 3$ intensity units (the only residual distortion).
+For the MRI test case (Table~\ref{tab:rdh-regions}): the proof-undo and meta-undo regions together contain $4{,}268 + 10{,}132 = 14{,}400$ undo positions.
+An undo pixel $u_i$ is modified if and only if the original 2 LSBs of $d_i$ differ from the data payload bits written to $d_i$; in the test case this occurs at approximately 10,788 of the 14,400 undo positions ($\approx 74.9\%$ of undo pixels, or 4.1\% of the total image pixels), with a maximum intensity error of $3/65535 = 0.005\%$.
+
+Table~\ref{tab:rdh-regions} summarises the four embedded regions for a representative MRI scan.
+
+\begin{table}[htbp]
+\centering\small
+\caption{RDH Region Layout for a Representative 512$\times$512 MR Scan}
+\label{tab:rdh-regions}
+\begin{tabularx}{\columnwidth}{@{}l X r l@{}}
+\toprule
+\textbf{Region} & \textbf{Role} & \textbf{Pos.} & \textbf{Key} \\
+\midrule
+proof\_undo & Orig.\ LSBs of proof\_data pixels & 4,268 & proof\_key \\
+proof\_data & Header + proof.json + public.json & 4,268 & proof\_key \\
+meta\_undo  & Orig.\ LSBs of meta\_data pixels & 10,132 & chaos\_key \\
+meta\_data  & Gzip-compressed DICOM metadata & 10,132 & chaos\_key \\
+\midrule
+\textbf{Total} & & \textbf{28,800} & \\
+\bottomrule
+\multicolumn{4}{@{}l@{}}{\small Border zone: 144,432 px; utilisation 19.9\%.}
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
+    \small\textit{[FIGURE PLACEHOLDER --- Fig.~3: Stego Visual Comparison]}\\[4pt]
+    Three panels from one DICOM slice (e.g., 1-04.dcm).\\
+    (a) Original 16-bit grayscale image.\\
+    (b) Stego 16-bit grayscale (visually identical to (a)).\\
+    (c) Absolute difference image, amplified $\times$1000: only the
+    10-pixel border ring shows nonzero values; the diagnostic core is
+    uniformly black, confirming zero modification of core tissue.
+    \vspace{2.5cm}}}
+    \caption{Visual comparison between original DICOM and stego image.
+    The amplified difference map (right) confirms that distortion is
+    confined to the border zone.}
+    \label{fig:image-comparison}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
+    \small\textit{[FIGURE PLACEHOLDER --- Fig.~4: RDH Region Map]}\\[4pt]
+    Color-coded overlay on the border zone of a DICOM slice.\\
+    Four color regions: proof\_undo (color A), proof\_data (color B),
+    meta\_undo (color C), meta\_data (color D).\\
+    Illustrates the non-overlapping partition of border pixels into
+    four chaos-trajectory segments.
+    \vspace{2.5cm}}}
+    \caption{RDH region layout within the border zone.
+    Four non-overlapping position sets are derived from two independent
+    chaos trajectories; undo regions store original LSBs for pixel
+    restoration after extraction.}
+    \label{fig:rdh-regions}
+\end{figure}
+
+\subsection{Embedding Layout and Header Format}
+
+The proof-key region carries a fixed 84-byte ZKDC header at its beginning, followed by the serialized proof and public signals:
+
+\begin{table}[htbp]
+\centering\small
+\caption{ZKDC Header Format (84 bytes fixed, proof and public signals appended)}
+\label{tab:zkdc-header}
+\begin{tabularx}{\columnwidth}{@{}c l X@{}}
+\toprule
+\textbf{Bytes} & \textbf{Field} & \textbf{Content} \\
+\midrule
+0--3   & Magic          & \texttt{b"ZKDC"} \\
+4--7   & Version        & \texttt{0x02000000} (v2: RDH + border zone) \\
+8--39  & Key hash       & SHA-256(chaos\_key), 32\,B \\
+40--71 & Payload hash   & SHA-256(gzip(metadata)), 32\,B \\
+72--75 & Bit count      & \texttt{metadata\_bit\_count}, uint32 LE \\
+76--79 & Proof len      & \texttt{proof\_json\_len}, uint32 LE \\
+80--83 & Public len     & \texttt{public\_json\_len}, uint32 LE \\
+\midrule
+$84$ -- $84{+}\ell_p$ & Proof  & Serialized \texttt{proof.json} \\
+$84{+}\ell_p$ -- end  & Public & Serialized \texttt{public.json} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent
+Total proof-region payload: $(84 + \ell_p + \ell_{\text{pub}}) \times 8$ bits.
+The serialized sizes $\ell_p$ (\texttt{proof.json}) and $\ell_{\text{pub}}$ (\texttt{public.json}) depend on the snarkjs output format; in the measured test case $\ell_p + \ell_{\text{pub}} \approx 984$\,bytes, giving $(84 + 984) \times 8 = 8{,}544$~bits requiring approximately $4{,}272$ proof-data positions and an equal number of proof-undo positions (see Table~\ref{tab:rdh-regions}). The implemented position count of 4,268 (Table~\ref{tab:rdh-regions}) is slightly less than this formula value, reflecting ACM walk steps that are rejected because they land outside the border zone mask or conflict with an exclusion set, reducing the usable count by a small implementation-dependent margin.
+The values $\approx 1.1$\,KB and $\approx 830$\,B quoted in ZK-system documentation represent upper bounds on \texttt{proof.json} and \texttt{public.json} respectively; their sum ($\approx 1.93$\,KB) is the theoretical upper bound.
+The measured test-case total (including the 84-byte header) is $\approx 1.04$\,KB, which is the value cited in the abstract and introduction.
+
+\subsection{Groth16 zk-SNARK Circuit}
+
+The circuit is compiled and implements \eqref{eq:zkstatement} as an R1CS with wire vector $z = (1,\, \mathbf{a},\, \mathbf{w})$:
+\begin{equation}
+(Az) \circ (Bz) = Cz,
+\label{eq:r1cs}
+\end{equation}
+where $A, B, C \in \mathbb{F}^{m \times n}$ and $\circ$ denotes the Hadamard product.
+The R1CS is transformed to a Quadratic Arithmetic Program (QAP) with selector families $\{u_i(X), v_i(X), w_i(X)\}_{i=0}^{m}$ and target polynomial $t(X)$ satisfying~\cite{b16}:
+\begin{equation}
+\Bigl(\sum_{i} a_i u_i(X)\Bigr) \Bigl(\sum_{i} a_i v_i(X)\Bigr)
+= \sum_{i} a_i w_i(X) + h(X)\,t(X),
+\label{eq:qap}
+\end{equation}
+for quotient polynomial $h(X)$.
+The circuit has $|\mathcal{C}| = 18{,}429$ constraints on a pot16 trusted setup ($2^{16} = 65{,}536$ maximum; utilisation~28.1\%).
+
+A natural question is whether proving only 16 embedding positions provides sufficient cryptographic confidence for the entire chaos trajectory.
+It does, because ACM is a deterministic function of $(x_0, y_0, K_{\text{chaos}})$: the full position sequence is uniquely and completely determined by these three values.
+Proving the correct derivation of 16 positions under the committed key is therefore equivalent to proving knowledge of the full trajectory seed.
+An adversary cannot selectively forge a subset of positions without controlling the seed, since any deviation in $(x_0, y_0, K_{\text{chaos}})$ propagates through all subsequent map iterations, and the committed $C_{\text{pub}} = \mathsf{Poseidon}(\mathbf{m}_{32}, K_{\text{chaos}}, \rho)$ binds $K_{\text{chaos}}$ to the proof.
+
+\textbf{Public inputs} (extracted from the stego-image via the proof-key header and embedded \texttt{public.json}; the chaos key is not required):
+\begin{itemize}
+  \item $C_{\text{pub}}$: $\mathsf{Poseidon}(\mathbf{m}_{32},\; K_{\text{chaos}},\; \rho)$,
+    binding the 32-bit metadata fingerprint and the secret key.
+  \item $\mathbf{h}_{\text{img}}[8]$: SHA-256 of the cover image, split into
+    eight BN254 field elements, binding the proof to a specific carrier image.
+  \item $N_{\text{pub}}$: $\mathsf{Poseidon}(s,\; \eta)$, preventing replay
+    of the same proof against a different image.
+\end{itemize}
+
+\textbf{Private witness}: $\mathbf{m}_{32}$, $K_{\text{chaos}}$, $\rho$,
+$s$, $\eta$, $(x_0, y_0)$, $P[16][2]$ (16 embedding coordinates), and
+$\mathbf{h}_{\text{img,priv}}[8]$ (equality-checked against the public hash).
+
+Table~\ref{tab:circuit} details the constraint breakdown by template.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Circuit Constraint Breakdown}
+\label{tab:circuit}
+\begin{tabularx}{\columnwidth}{@{}X r l@{}}
+\toprule
+\textbf{Template} & \textbf{Constr.} & \textbf{Purpose} \\
+\midrule
+Bit constraints ($\mathbf{m}_{32}$) & 32 & $m_i(1{-}m_i)=0$ \\
+MessageCommitment (Poseidon) & $\approx$250 & Msg.\ + key binding \\
+Nullifier (Poseidon) & $\approx$250 & Replay prevention \\
+ImageHash ($\times$8 IsEqual) & 8 & Image binding \\
+PositionVerif.\ ($\times$16 ACM) & $\approx$16,000 & ACM correctness \\
+RangeProof ($\times$32 LessThan) & $\approx$640 & $x,y\in[0,1024)$ \\
+MerkleTree ($\times$31 Poseidon) & $\approx$1,250 & Pos.\ commitment \\
+Initial bounds & 2 & $x_0,y_0\in[0,1024)$ \\
+\midrule
+\textbf{Total} & \textbf{18,429} & \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\noindent
+Note: The circuit does \emph{not} prove the full metadata content (infeasible at pot16 scale).
+Full payload integrity is guaranteed by the complete 256-bit SHA-256 hash stored in the 84-byte header, verified at extraction (step~10 of Section~\ref{subsec:extraction}); the $C_{\text{pub}}$ commitment binds $\mathbf{m}_{32}$ (the first 32 bits of this hash) to the ZK proof as a partial cryptographic anchor, while the remaining 224 bits of the digest are checked at the application layer.
+
+\textbf{Verification.}
+Let $\mathrm{IC}(\mathbf{a}) = vk_0 + \sum_{i=1}^{n_{\text{pub}}} a_i\, vk_i \in G_1$.
+Groth16 verification checks the pairing product:
+\begin{equation}
+e(\pi_A,\, \pi_B) \stackrel{?}{=}
+e(vk_\alpha,\, vk_\beta) \cdot
+e\!\left(\mathrm{IC}(\mathbf{a}),\, vk_\gamma\right) \cdot
+e(\pi_C,\, vk_\delta),
+\label{eq:groth16-pair}
+\end{equation}
+with $vk_\alpha \in G_1$ and $vk_\beta, vk_\gamma, vk_\delta \in G_2$ from the common reference string.
+
+\subsection{System Setup and Deployment Requirements}
+
+A one-time setup phase distributes the verifier package to all recipient nodes.
+Table~\ref{tab:prover-reqs} and Table~\ref{tab:verifier-reqs} list the software and artifact requirements for the prover and verifier roles respectively.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Prover (Sender) System Requirements (all components required)}
+\label{tab:prover-reqs}
+\begin{tabularx}{\columnwidth}{@{}l X@{}}
+\toprule
+\textbf{Component} & \textbf{Purpose} \\
+\midrule
+Python $\geq$ 3.9      & Runtime for embed/extract scripts \\
+pydicom                & DICOM file parsing \\
+Pillow (PIL)           & 16-bit PNG I/O \\
+NumPy                  & Pixel array operations \\
+SciPy (\texttt{ndimage})& Binary erosion for border-zone detection \\
+circomlibjs (npm)      & Poseidon hash for ZK witness generation \\
+snarkjs $\geq$ 0.7.6   & Groth16 proof generation \\
+Node.js $\geq$ 18      & snarkjs runtime \\
+\texttt{chaos\_zk\_stego.zkey} & Proving key (12\,MB); kept on prover only \\
+\texttt{witness\_calc.wasm}    & Circuit witness generator (WebAssembly) \\
+Chaos key                      & Private chaos key; pre-shared with verifier; storage mechanism (file, environment variable, secrets store) is deployment-specific \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[htbp]
+\centering\small
+\caption{Verifier (Recipient) System Requirements (all components required)}
+\label{tab:verifier-reqs}
+\begin{tabularx}{\columnwidth}{@{}l X@{}}
+\toprule
+\textbf{Component} & \textbf{Purpose} \\
+\midrule
+Python $\geq$ 3.9      & Runtime \\
+pydicom, Pillow, NumPy & Image/metadata I/O \\
+SciPy (\texttt{ndimage}) & Border-zone erosion during extraction \\
+snarkjs $\geq$ 0.7.6   & Groth16 \emph{verification} only (no proving key needed) \\
+Node.js $\geq$ 18      & snarkjs runtime \\
+\texttt{verification\_key.json} & Verification key (4.5\,KB); public, safe to distribute \\
+Chaos key                       & Private chaos key; storage mechanism is deployment-specific (file, env var, or secrets store); \emph{not} needed for public-auditor role \\
+\bottomrule
+\multicolumn{2}{@{}l@{}}{\small Public auditor: only \texttt{verification\_key.json} + snarkjs needed.}
+\end{tabularx}
+\end{table}
+
+\textbf{One-time setup.}
+The sender distributes a verifier package containing: \texttt{verification\_key.json} (4.5\,KB, public), the chaos key (private, transmitted over a secure channel; stored in a deployment-appropriate secrets store), and the extraction script.
+After this single setup, every subsequent PACS transfer consists of the stego PNG image alone.
+No proving key or WebAssembly witness generator is required on the verifier side.
+
+\textbf{Distinction of verifier roles.}
+\begin{itemize}
+  \item \emph{Public auditor}: requires only \texttt{verification\_key.json} and
+    snarkjs. Invokes the CLI with \texttt{--verify-only}: locates the proof header
+    via the public proof key, runs the Groth16 pairing check, and reports
+    pass/fail. Cannot read patient metadata.
+  \item \emph{Authorized recipient}: additionally requires the pre-shared chaos key.
+    Extracts metadata, validates SHA-256 integrity, and optionally invokes RDH
+    restoration to recover exact original pixel values at diagnostic-core and metadata-region positions with \texttt{--restore-output}.
+\end{itemize}
+
+\subsection{Extraction and Verification Protocol}
+\label{subsec:extraction}
+
+Given a stego PNG and the proof key (public), the extraction pipeline proceeds as follows:
+
+\begin{enumerate}
+  \item Load the stego PNG as a uint16 NumPy array.
+  \item Detect the border zone $\mathcal{B}$ using \eqref{eq:borderzone} with
+    $M_e = 10$ erosion iterations.
+  \item Derive proof-key positions via the chaos trajectory seeded from
+    \texttt{generate\_chaos\_key\_from\_secret(proof\_key)}, restricted
+    to $\mathcal{B}$.
+  \item Extract 84 bytes of the ZKDC header from the first header positions.
+  \item Validate the magic \texttt{b"ZKDC"} and version
+    \texttt{0x02000000}.
+  \item Extract \texttt{proof.json} and \texttt{public.json} from the
+    remaining proof-key positions.
+  \item \textbf{ZK verification}: pass
+    (\texttt{proof.json}, \texttt{public.json},
+    \texttt{verification\_key.json}) to
+    \texttt{snarkjs groth16.verify()} via the Groth16 pairing check
+    \eqref{eq:groth16-pair}.
+    If verification fails, all roles terminate immediately and the image is rejected.
+    A public auditor also terminates here on success.
+  \item (\emph{Authorized recipient}) Validate SHA-256(chaos\_key) against
+    the header hash field.
+  \item Derive metadata positions from the chaos key; extract metadata bits;
+    decompress gzip; parse JSON.
+  \item Validate metadata integrity: SHA-256(gzip(metadata)) must match the
+    header field.
+  \item \textbf{RDH restoration}: re-derive proof-undo and meta-undo
+    positions; read undo bits from stego; apply \eqref{eq:rdh-restore} to
+    all data positions; return the restored pixel array $\hat{I}$.
+\end{enumerate}
+
+\noindent
+Return values: \texttt{success}, \texttt{zk\_verified},
+\texttt{metadata\_dict} ($\approx$294 tags), \texttt{restored\_pixel\_array}.
+
+\section{Experimental Results and Evaluation}
+\label{sec:results}
+
+This section presents quantitative evaluation of the proposed framework across three representative DICOM test cases (MR T1 phantom, 512$\times$512, MultiFlip acquisition).
+Image fidelity, entropy stability, and proof timing results are reported in Sections~4.1--4.3; network performance measurements are reported in Section~\ref{subsec:network}.
+
+\subsection{Image Quality Metrics: PSNR, MSE, and SSIM}
+
+Distortion measurement uses mean squared error (MSE), peak signal-to-noise ratio (PSNR), and structural similarity index (SSIM).
+Let $I$ be the 16-bit cover image and $S$ be the stego image.
+
+\paragraph{Mean Squared Error (MSE)}
+\begin{equation}
+\mathrm{MSE} = \frac{1}{M\,N} \sum_{i=0}^{M-1} \sum_{j=0}^{N-1}
+\bigl(I_{ij} - S_{ij}\bigr)^2,
+\label{eq:mse}
+\end{equation}
+where $M \times N$ is the image size in pixels and $I_{ij}, S_{ij} \in [0,\, 65535]$ are the 16-bit pixel values.
+
+\paragraph{Peak Signal-to-Noise Ratio (PSNR)}
+With dynamic range $L = 65535$ for 16-bit images:
+\begin{equation}
+\mathrm{PSNR} = 10\,\log_{10}\!\left(\frac{L^2}{\mathrm{MSE}}\right)
+\;\text{dB}.
+\label{eq:psnr}
+\end{equation}
+
+\paragraph{Structural Similarity Index (SSIM)}
+\begin{align}
+\mathrm{SSIM}(I, S) &=
+  \bigl[l(I,S)\bigr]^{\alpha}
+  \bigl[c(I,S)\bigr]^{\beta}
+  \bigl[\mathrm{struct}(I,S)\bigr]^{\gamma},
+  \label{eq:ssim-prod}\\
+l(I,S) &= \frac{2\mu_I\mu_S + C_1}{\mu_I^2 + \mu_S^2 + C_1},
+  \label{eq:ssim-l}\\
+c(I,S) &= \frac{2\sigma_I\sigma_S + C_2}{\sigma_I^2 + \sigma_S^2 + C_2},
+  \label{eq:ssim-c}\\
+\mathrm{struct}(I,S) &= \frac{\sigma_{IS} + C_3}{\sigma_I\sigma_S + C_3},
+  \label{eq:ssim-s}
+\end{align}
+with $\alpha = \beta = \gamma = 1$ and $C_3 = C_2/2$ in standard usage.
+For grayscale images, a single SSIM score is reported.
+
+Table~\ref{tab:quality-full} reports image quality and proof metrics measured across three representative MR T1 phantom DICOM images (512$\times$512, MultiFlip T1 acquisition).
+All quality scores are computed between the 16-bit cover image and the stego image after embedding but before RDH restoration.
+
+\begin{table*}[t]
+    \centering
+    \caption{Image Quality and Proof Metrics}
+    \label{tab:quality-full}
+    \resizebox{\textwidth}{!}{%
+        \begin{tabular}{lcccccccc}
+            \toprule
+            \textbf{Image / Test Case} & \textbf{PSNR (dB)} & \textbf{SSIM} & \textbf{MSE} &
+            \textbf{Border px} & \textbf{Positions used} & \textbf{PG (s)} & \textbf{PV (ms)} & \textbf{Proof size (KB)} \\
+            \midrule
+            MR T1 phantom 512$\times$512 (case A) & 103.38 & 1.000000 & 0.197 & 144,432 & 28,800 (19.9\%) & 8.2 & 3,417 & 1.04 \\
+            MR T1 phantom 512$\times$512 (case B) & 103.38 & 1.000000 & 0.197 & 149,075 & 28,736 (19.3\%) & 5.8 & 3,049 & 1.04 \\
+            MR T1 phantom 512$\times$512 (case C) & 103.34 & 1.000000 & 0.199 & 140,581 & 28,848 (20.5\%) & 5.9 & 3,022 & 1.04 \\
+            \bottomrule
+            \multicolumn{9}{@{}l@{}}{\small PG = proof generation time. PV = wall-clock verification time including Node.js process startup ($\approx$3\,s); cryptographic pairing time is $\approx$1--3\,ms in native implementations. Positions used = data + undo.}
+        \end{tabular}%
+    }
+\end{table*}
+
+\subsection{Pixel Distribution and Entropy Stability}
+
+To assess imperceptibility at the statistical level, per-pixel histograms of the cover and stego images are compared.
+\prettyref{fig:hist} illustrates the grayscale intensity histograms.
+Because embedding is restricted to the border zone (at most 20.5\% of pixels) and modifies at most 2 LSBs (values $\pm 3$ at 16-bit), the histogram curves are nearly identical, with minor deviations concentrated in the boundary-pixel range.
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
+    \small\textit{[FIGURE PLACEHOLDER --- Fig.~5: Grayscale Histogram Comparison]}\\[4pt]
+    Two subplots.\\
+    (a) Overlaid 16-bit grayscale histograms of original vs. stego image
+    (full intensity range or normalized): curves nearly identical.\\
+    (b) Zoom-in on the border-zone pixel intensity range showing the small
+    distribution shift from 2-bit LSB modification.
+    \vspace{2.5cm}}}
+    \caption{Grayscale histogram comparison between cover and stego images.
+    Distributions remain nearly identical, confirmed by $\Delta H < 0.021$\,bits and $\mathrm{JSD} < 5\times10^{-4}$ across all test cases (Section~\ref{sec:results}).}
+    \label{fig:hist}
+\end{figure}
+
+Shannon entropy and Jensen-Shannon divergence~(JSD) are used to quantify distribution drift.
+Let $P(i)$ and $Q(i)$ be empirical intensity histograms of cover and stego:
+\begin{equation}
+H(P) = -\sum_{i} P(i) \log_2 P(i),
+\label{eq:entropy}
+\end{equation}
+\begin{equation}
+\mathrm{JSD}(P \| Q) =
+\tfrac{1}{2} D_{\mathrm{KL}}\!\left(P \;\Big\|\; \tfrac{P+Q}{2}\right)
++ \tfrac{1}{2} D_{\mathrm{KL}}\!\left(Q \;\Big\|\; \tfrac{P+Q}{2}\right).
+\label{eq:jsd}
+\end{equation}
+Measured values across the three test cases confirm negligible distribution drift.
+For case~A (1-04), $\Delta H = 0.020$\,bits and $\mathrm{JSD} = 4.35 \times 10^{-4}$.
+For case~B (1-10), $\Delta H = 0.020$\,bits and $\mathrm{JSD} = 4.03 \times 10^{-4}$.
+For case~C (1-06), $\Delta H = 0.020$\,bits and $\mathrm{JSD} = 4.30 \times 10^{-4}$.
+All $\Delta H < 0.021$\,bits and all $\mathrm{JSD} < 5 \times 10^{-4}$, consistent with the restricted border-zone utilisation and 2-bit maximum modification.
+
+\subsection{Embedding Capacity and RDH Overhead}
+
+Table~\ref{tab:capacity} reports the embedding capacity breakdown.
+The available border-zone capacity depends on image size and ROI geometry; the protocol imposes a $2\times$ overhead from the RDH undo regions.
+
+\begin{table}[t]
+    \centering
+    \caption{Embedding Capacity and RDH Overhead}
+    \label{tab:capacity}
+    \begin{tabularx}{\columnwidth}{@{}l X X X@{}}
+    \toprule
+    \textbf{Image} & \textbf{Border px} & \textbf{Positions used} & \textbf{Utilisation} \\
+    \midrule
+    MR T1 phantom 512$\times$512 (case A) & 144,432 & 28,800 & 19.9\% \\
+    MR T1 phantom 512$\times$512 (case B) & 149,075 & 28,736 & 19.3\% \\
+    MR T1 phantom 512$\times$512 (case C) & 140,581 & 28,848 & 20.5\% \\
+    \bottomrule
+    \multicolumn{4}{@{}l@{}}{\small Positions used = data + undo regions across both key streams.}
+    \end{tabularx}
+\end{table}
+
+\subsection{Network Performance Analysis and Evaluation}
+\label{subsec:network}
+
+We evaluate communication feasibility under distributed deployments by separating wire-level transfer (network-only goodput) from end-to-end pipeline latency (which includes serialization and software integration overhead).
+Results are reported for two operational phases: (i)~\textbf{setup distribution}, transferring configuration artifacts required to initialize the verifier; and (ii)~\textbf{stego-object transmission}, transferring the generated stego image over representative hospital network channels.
+
+\subsubsection{Setup Distribution Phase}
+
+Table~\ref{tab:net_setup_p2p} summarizes setup artifact transfer over WiFi P2P between two nodes.
+The setup bundle completes in 0.065\,s at 59.17\,Mbps, confirming that one-time verifier initialization is negligible in overhead.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\caption{Setup distribution over WiFi P2P (wire-level).}
+\label{tab:net_setup_p2p}
+\begin{tabularx}{\columnwidth}{@{}l >{\raggedleft\arraybackslash}X@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total files          & 10 \\
+Total size           & 0.222\,MB \\
+Total time           & 0.065\,s \\
+Avg.\ throughput     & 59.17\,Mbps \\
+Total packets        & 271 \\
+Avg.\ time/file      & 0.007\,s \\
+File size (min--max) & 8.6--40.3\,KB \\
+\bottomrule
+\multicolumn{2}{@{}p{\linewidth}@{}}{\small Reference data from prior system version; retained as baseline. Stego image size and proof payload are updated in Table~\ref{tab:net_e2e_http}.}
+\end{tabularx}
+\end{table}
+
+\subsubsection{Stego-Object Transmission Phase}
+
+\paragraph{Wire-level transfer across channels.}
+Table~\ref{tab:net_wire_channels} reports wire-level transfer on two representative hospital network channels: Ethernet LAN and CAN bus.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\caption{Wire-level stego transfer across hospital network channels.}
+\label{tab:net_wire_channels}
+\begin{tabularx}{\columnwidth}{@{}l >{\raggedright\arraybackslash}X r r r@{}}
+\toprule
+\textbf{Ch.} & \textbf{Transport} & \textbf{Payload} & \textbf{Time (s)} & \textbf{Mbps} \\
+\midrule
+LAN & TCP/loopback    & 1.289\,MB & 0.051 & $\approx$212 \\
+CAN & CAN (125\,kbps) & 500\,KB   & 210   & $\approx$0.020 \\
+\bottomrule
+\multicolumn{5}{@{}p{\linewidth}@{}}{\small Reference data from prior system version; retained as baseline. Stego image size and proof payload are updated in Table~\ref{tab:net_e2e_http}.}
+\end{tabularx}
+\end{table}
+
+On LAN, large packets reduce per-packet overhead and yield high effective goodput suitable for real-time PACS streaming.
+The CAN result (210\,s for 500\,KB) is presented as a worst-case stress test of protocol correctness under extreme bandwidth constraints, not as a primary deployment path: in realistic clinical CAN deployments, diagnostic equipment exchanges short control frames rather than full imaging payloads, so only the compact proof artifact ($\approx$1.04\,KB) or a notification message would transit the CAN link, reducing transfer time to under one second at 125\,kbps.
+Full stego-image transfer is intended for LAN/PACS channels; the CAN measurement confirms protocol interoperability at the byte-framing level under constrained conditions.
+
+\paragraph{End-to-end pipeline latency over HTTP/TCP.}
+Table~\ref{tab:net_e2e_http} reports end-to-end transfer time over HTTP/TCP, including application-layer processing overhead.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+\caption{End-to-end pipeline latency over HTTP/TCP per test case
+(loopback; Groth16; includes proof generation and transfer overhead).}
+\label{tab:net_e2e_http}
+\begin{tabularx}{\columnwidth}{@{}X r r r r@{}}
+\toprule
+\textbf{Test Case} & \textbf{Payload} & \textbf{Time} & \textbf{Mbps} & \textbf{Pkts} \\
+                   & \textbf{(KB)}    & \textbf{(s)}  &               &               \\
+\midrule
+MR T1 phantom, case~A & 115.33 & 10.07 & 0.094 & 81 \\
+MR T1 phantom, case~B & 110.42 & 10.10 & 0.090 & 78 \\
+MR T1 phantom, case~C & 115.53 &  9.95 & 0.095 & 82 \\
+\bottomrule
+\multicolumn{5}{@{}p{\linewidth}@{}}{\small Dominant cost: proof generation (5.8--8.2\,s, Table~\ref{tab:quality-full}); wire-level loopback transfer $<$0.4\% of total. Cases A, B, C correspond to DICOMs 1-04, 1-10, 1-06 respectively.}
+\end{tabularx}
+\end{table}
+
+The observed pipeline time is dominated by Groth16 witness computation and proof generation at the sender, not by network transfer:
+across the three test cases, total pipeline time ranges from 9.95\,s to 10.10\,s; proof generation (5.8--8.2\,s, Table~\ref{tab:quality-full}) accounts for the dominant fraction, with the remainder attributable to embedding, file I/O, and HTTP application-layer overhead, while wire-level loopback transfer contributes less than 0.4\%.
+This motivates separating wire-level capacity (Table~\ref{tab:net_wire_channels}) from pipeline-level latency (Table~\ref{tab:net_e2e_http}) when assessing deployment feasibility.
+
+\subsection{Performance Scaling}
+
+The full pipeline has the following asymptotic characteristics:
+\begin{itemize}
+  \item \textbf{Border zone detection} (ROI mask + binary erosion): $O(WH)$.
+  \item \textbf{Position generation} (ACM walk over border zone): $O(N_{\text{pos}})$,
+    proportional to the number of positions required.
+  \item \textbf{LSB embedding/extraction}: $O(N_{\text{pos}})$.
+  \item \textbf{Groth16 witness computation}: $O(|\mathcal{C}|)$,
+    independent of image resolution for a fixed circuit.
+  \item \textbf{Groth16 proof generation}: dominated by multi-scalar
+    multiplication on BN254; constant for fixed $|\mathcal{C}| = 18{,}429$.
+  \item \textbf{Groth16 verification}: three BN254 pairings; constant-time
+    ($\approx$1--3\,ms) independent of image size or payload length.
+\end{itemize}
+
+Proof generation times (witness construction + \texttt{snarkjs groth16 prove}) measured across the three test cases range from 5.8\,s to 8.2\,s on the test hardware; this variation reflects Node.js JIT warm-up across runs rather than image-size dependence, as the constraint count is fixed at 18,429.
+Groth16 verification via \texttt{snarkjs groth16 verify} completes in 3{,}022--3{,}417\,ms across all three cases; the dominant cost is Node.js process startup ($\approx$3\,s overhead), while the actual three BN254 pairing operations require $\approx$1--3\,ms in a native implementation, confirming the constant-time property of the cryptographic core.
+
+\subsection{Security Analysis}
+\label{sec:security-analysis}
+
+\textbf{Security goals.}
+We distinguish three goals: (G1)~\emph{Verifiable embedding integrity}: a verifier should accept only if the received image is consistent with the prescribed chaos-controlled LSB embedding and the declared public inputs.
+(G2)~\emph{Witness privacy}: the proof should reveal nothing about the secret witness beyond the validity of the statement.
+(G3)~\emph{Payload confidentiality}: an observer without the chaos key should not be able to reconstruct the metadata or the embedding locations.
+
+\textbf{Threat model.}
+We consider (i)~a passive adversary observing the stego image and any public metadata, and (ii)~an active adversary who may modify pixels, strip the header, or tamper with public inputs.
+The chaos key $K_{\text{chaos}}$ and the Groth16 witness $w$ remain secret; the verification key is public.
+Groth16 requires a trusted setup; toxic waste is assumed to be securely discarded.
+
+\textbf{Soundness and tamper detection.}
+By Groth16 soundness under the $q$-knowledge-of-exponent assumption in the generic group model~\cite{b8}, no PPT adversary can forge an accepting proof for a false statement except with negligible probability.
+Any modification to the proof bits, the image hash $\mathbf{h}_{\text{img}}$, the commitment $C_{\text{pub}}$, or the nullifier $N_{\text{pub}}$ causes the pairing check \eqref{eq:groth16-pair} to fail.
+An active attacker can cause \emph{rejection} (denial-of-service) by distorting pixels, but cannot make a modified image \emph{pass} without producing a fresh valid proof under the secret witness.
+This constitutes a \emph{fail-closed} integrity guarantee: any tampering drives the system to reject rather than to silently accept a corrupted or substituted payload, which is the desired behavior for a clinical integrity check.
+
+\textbf{Dual-key access control.}
+The proof key is public; its region can be read and verified by any party.
+The chaos key is private; its region position sequence is computationally unpredictable to an adversary without $K_{\text{chaos}}$.
+Even if a network adversary fully observes the stego image, metadata remains confidential unless the chaos key is compromised.
+The SHA-256 hash stored in the header allows key validation without key recovery.
+
+\textbf{RDH and clinical compliance.}
+The RDH scheme guarantees that after authorized extraction, the diagnostic pixel record is restored exactly.
+Undo positions store original LSBs in verifiable form; their permanent minor modification ($\pm 3$ / 65535, equivalent to 0.005\% of full scale) is confined to the border zone and does not affect diagnostic tissue; at 16-bit depth this represents a change of at most 3 intensity steps out of 65,535, negligible relative to any diagnostically relevant signal window.
+The proof-undo positions are derivable from the public proof key and are therefore not protected by the ZK tamper-detection guarantee: a targeted attack modifying only proof-undo pixels would pass ZK verification but corrupt border-zone pixel restoration at those positions.
+Since proof-undo pixels lie entirely outside diagnostic tissue, clinical pixel integrity is not affected; however, exact border-zone restoration cannot be guaranteed in the absence of additional undo-region authentication.
+Hardening proof-undo integrity (e.g., by a MAC over the undo region) is identified as an avenue for future work.
+
+\textbf{Zero-knowledge (witness privacy).}
+The Groth16 proof reveals nothing about the witness $w$ beyond the fact that the statement \eqref{eq:zkstatement} is satisfied.
+Metadata confidentiality additionally depends on the secrecy of $K_{\text{chaos}}$ and the computational difficulty of recovering the chaos trajectory without the key.
+
+\textbf{Steganographic channel limitations.}
+The spatial-domain LSB channel is not robust against lossy post-processing (JPEG re-compression, geometric transforms, or gamma correction).
+Such transforms may destroy embedded bits and produce verification failure; they do not, however, enable an adversary to produce a new accepting proof for the modified image without re-running the prover under the secret witness.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper introduced a verifiable DICOM medical image steganography framework that tightly integrates four innovations: a native 16-bit DICOM preprocessing pipeline that preserves the full clinical intensity range; chaos-controlled LSB embedding restricted to the outermost 10-pixel ring of the Region of Interest combined with Reversible Data Hiding that guarantees exact recovery of diagnostic-core pixels and metadata-region pixels after extraction; a dual-key architecture that decouples public ZK-proof auditability from private metadata access; and a Groth16 zk-SNARK with 18,429~constraints that provides, to the best of the authors' knowledge, the first non-interactive, zero-knowledge proof of computational embedding integrity for a DICOM steganography system.
+
+The resultant output is a single 16-bit PNG stego-image that carries the hidden DICOM metadata (gzip-compressed from $\approx$8\,KB to $\approx$2.5\,KB), a Groth16 integrity proof, and all verification material---entirely within pixel LSBs, requiring no auxiliary files at the PACS verification node.
+Embedding is restricted to non-diagnostic border tissue, with a maximum pixel distortion of $3/65535 = 0.005\%$ upon embedding and zero residual distortion at data positions after RDH restoration (see Section~\ref{sec:security-analysis} for the limited exception at proof-undo positions).
+A public auditor can verify embedding integrity in 1--3\,ms from the 4.5\,KB verification key alone, without accessing any patient data.
+The authorized recipient additionally recovers the full metadata payload and exact original pixel values at diagnostic-core and metadata-region positions using the pre-shared chaos key.
+
+Current limitations include the fragility of the spatial-domain LSB channel under lossy post-processing (JPEG re-compression, geometric transforms) and the Groth16 trusted-setup requirement: the Powers-of-Tau ceremony and circuit-specific key generation must be completed once per circuit configuration, and if the toxic waste from the ceremony were compromised, the soundness guarantees would fail.
+In practice this is mitigated by using a publicly verifiable multi-party ceremony (such as the pot16 ceremony used here), but it remains a deployment consideration.
+Future work will investigate robust steganographic channels for environments where re-encoding is unavoidable, explore universal or transparent proof systems (PLONK, STARKs) that reduce or eliminate the trusted-setup requirement, and extend the DICOM pipeline to compressed modalities such as JPEG\,2000 radiological archives.
+
+\section*{References}
+\printbibliography[heading=none]
+
+
+% \section*{Reference}
+% Reference style should be strictly followed by the guidance in the examples below. References should be numbered in sequence and cited in the main text, and must be arranged in the order they are cited in the main text. When cited, the reference should appear on the line, in square brackets, inside the punctuation, with the reference number such as \cite{BookTemplate}. In case, it is necessary to cite more than one reference, write them as \cite{BookTemplate, ArticleTemplate, ReportTemplate} or \cite{BookTemplate, HanbookTemplate, ReportHanbookOnlineTemplate}. Please do not use automatic endnotes in \textit{Word}, rather, type the reference list at the end of the paper using the "References" style.
+
+% Reference numbers are set flush left and form a column of their own, hanging out beyond the body of the reference. The reference numbers are on the line, enclosed in square brackets. In all references, the given name of the author or editor is abbreviated to the initial only and precedes the last name. Use them all; use et al. only if names are not given. Use commas around Jr., Sr., in names. Abbreviate conference titles. When referencing a patent, provide the day and the month of issue, or application. References may not include all information; please obtain and include relevant information. Do not combine references. There must be only one reference with each number. If there is a URL included with the print reference, it can be included at the end of the reference. In this case, a DOI number for the full text is recommended to use.
+
+% Other than books, capitalize only the first word in a paper title, except for proper nouns and element symbols. For papers published in translation journals, please give the English citation first, followed by the original foreign-language citation. See the end of this document for formats and examples of common references.
+
+% \begin{itemize}
+
+%   \item \textit{\textbf{Basic format for books:}} \cite{BookTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @book{BookTemplate,
+%     author = {Author, J. K.},
+%     title = {Title of His Published Book},
+%     chapter = {x},
+%     section = {x},
+%     chaptertitle = {Title of chapter in the book},
+%     edition = {n},
+%     location = {City of Publisher, Country},
+%     publisher = {Abbrev. of Publisher},
+%     address = {City of Publisher, Country},
+%     date = {1970},
+%     pages = {xx--yy},
+%     pagetotal = {ppp},
+%     keywords = {template},
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for periodicals:}} \cite{ArticleTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @article{ArticleTemplate,
+%     keywords = {template},
+%     author = {Author, J. K.},
+%     title = {Name of paper},
+%     journal = {Abbrev. title of periodical},
+%     volume = {11},
+%     number = {2},
+%     pages = {123-456},
+%     month = {1},
+%     year = {2024},
+%     doi = {https://doi.org/10.1109. xx.123456},
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for reports:}} \cite{ReportTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @report{ReportTemplate,
+%     author = {Author, J. K.},
+%     title = {Title of report},
+%     institution = {Name of Co.},
+%     address = {City of Co., Abbrev. State, Country},
+%     year = {2024},
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for handbooks:}} \cite{HanbookTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @book{HanbookTemplate,
+%     author    = {Author Name(s)},
+%     title     = {Title of the Handbook},
+%     edition   = {Edition (if applicable)},
+%     year      = {Year of Publication},
+%     publisher = {Publisher Name},
+%     address   = {Publisher Location},
+%     isbn      = {ISBN Number (if available)}
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for reports and handbooks (when available online):}} \cite{ReportHanbookOnlineTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @techreport{ReportHanbookOnlineTemplate,
+%     author    = {Author Name(s)},
+%     title     = {Title of the Report/Handbook},
+%     institution = {Institution/Organization Name},
+%     year      = {Year of Publication},
+%     number    = {Report Number (if applicable)},
+%     type      = {Report Type (e.g., Technical Report)},
+%     url       = {URL},
+%     note      = {Accessed: Month Day, Year}
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for computer programs and electronic documents (when available online):}} \cite{MISCTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @misc{MISCTemplate,
+%     author    = {Author Name(s) or Organization},
+%     title     = {Title of the Software or Document},
+%     year      = {Year of Release or Update},
+%     url       = {URL},
+%     note      = {Version number, Accessed: Month Day, Year}
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Example for papers presented at conferences (unpublished):}} \cite{InproceedingTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @inproceedings{InproceedingTemplate,
+%     keywords = {template},
+%     author = {Author, J. K.},
+%     title = {Title of paper},
+%     booktitle = {Abbreviated Name of Conf.},
+%     location = {City of Conf., Abbrev. State (if given), Country},
+%     date = {1970},
+%     pages = {xx-xx},
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for patents:}} \cite{PatentTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @patent{PatentTemplate,
+%     author = {Author, J. K.},
+%     title = {Title of patent},
+%     type = {U. S. Patent},
+%     number = {xx},
+%     date = {1970-12-31},
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic format for theses (M.S.) and dissertations (Ph.D.):}} \cite{MasterThesisTemplate}, \cite{PhDThesisTemplate}
+%   \begin{lstlisting}[language=TeX]
+% @mastersthesis{MasterThesisTemplate,
+%     author = {Author, J. K.},
+%     title = {Title of thesis},
+%     institution = {Abbrev. Dept, Abbrev. Univ.},
+%     school = {Abbrev. Dept, Abbrev. Univ.},
+%     location = {City of Univ., Abbrev. State},
+%     date = {1970},
+%     sortkey = {1},
+% }
+%   \end{lstlisting}
+
+%   \begin{lstlisting}[language=TeX]
+% @phdthesis{PhDThesisTemplate,
+%     author = {Author, J. K.},
+%     title = {Title of dissertation},
+%     institution = {Abbrev. Dept, Abbrev. Univ.},
+%     school = {Abbrev. Dept, Abbrev. Univ.},
+%     location = {City of Univ., Abbrev. State},
+%     date = {1970},
+%     sortkey = {2},
+% }
+%   \end{lstlisting}
+
+%   \item \textit{\textbf{Basic formats for standards:}} \cite{IEEE:Standard308}
+%   \begin{lstlisting}[language=TeX]
+% @standard{IEEE:Standard308,
+%     author = {IEEE},
+%     title = {IEEE Criteria for Class IE Electric Systems},
+%     number = {IEEE Standard 308},
+%     year = {1969},
+%   \end{lstlisting}
+
+\end{document}

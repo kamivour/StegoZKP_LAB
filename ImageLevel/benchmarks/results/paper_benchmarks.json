@@ -1,0 +1,55 @@
+{
+  "results": [
+    {
+      "label": "MR brain 512x512 (1-04)",
+      "dicom_file": "1-04.dcm",
+      "PSNR_dB": 103.3848,
+      "SSIM": 1.0,
+      "MSE": 0.197,
+      "border_px": 144432,
+      "positions_used": 20936,
+      "utilisation_pct": 14.5,
+      "PG_s": 8.23,
+      "PV_ms": 3416.51,
+      "proof_size_kb": 0.986,
+      "H_P": 4.166964,
+      "H_Q": 4.187132,
+      "delta_H": 0.020168,
+      "JSD": 0.00043508
+    },
+    {
+      "label": "MR phantom 512x512 (1-10)",
+      "dicom_file": "1-10.dcm",
+      "PSNR_dB": 103.3811,
+      "SSIM": 1.0,
+      "MSE": 0.1972,
+      "border_px": 149075,
+      "positions_used": 20888,
+      "utilisation_pct": 14.0,
+      "PG_s": 5.77,
+      "PV_ms": 3048.85,
+      "proof_size_kb": 0.987,
+      "H_P": 4.074324,
+      "H_Q": 4.094056,
+      "delta_H": 0.019732,
+      "JSD": 0.00040289
+    },
+    {
+      "label": "MR phantom 512x512 (1-06)",
+      "dicom_file": "1-06.dcm",
+      "PSNR_dB": 103.3424,
+      "SSIM": 1.0,
+      "MSE": 0.1989,
+      "border_px": 140581,
+      "positions_used": 20960,
+      "utilisation_pct": 14.9,
+      "PG_s": 5.94,
+      "PV_ms": 3021.83,
+      "proof_size_kb": 0.989,
+      "H_P": 4.15831,
+      "H_Q": 4.178154,
+      "delta_H": 0.019844,
+      "JSD": 0.00043021
+    }
+  ]
+}

@@ -72,18 +72,21 @@ This separation means:
 
 ---
 
-## Pixel Distortion
+## Pixel Distortion and Reversibility
 
-Each pixel carries **2 bits** (bits 1 and 0). The maximum change per pixel is ±3
-out of 65535 — an error of **0.005%**. This is below the noise floor of any
-DICOM modality and invisible on any display.
+Each pixel carries **2 bits** (bits 1 and 0). The maximum change per pixel during
+the stego phase is ±3 out of 65535 — an error of **0.005%**. After extraction,
+the verifier uses the embedded RDH undo map to restore exact original pixel values
+(zero distortion). Only border-zone pixels are ever modified.
 
 | Metric | Value |
 |---|---|
 | Embedding capacity | 2 bits / pixel |
-| Max distortion | ±3 / 65535 = 0.005% |
-| ROI pixels used (512×512 MR) | 10,460 of 185,568 (5.6%) |
-| Total pixel budget used | < 6% |
+| Embedding zone | Border ring of ROI (outermost 10 pixels of tissue) |
+| Max distortion during stego phase | ±3 / 65535 = 0.005% |
+| Distortion after RDH restoration | **0** — exact pixel recovery |
+| Border zone pixels (512×512 MR, 10-px ring) | ~148,141 of 262,144 (56.5%) |
+| Positions used: data + undo (512×512 MR) | ~36,360 of 148,141 (24.5%) |
 
 ---
 

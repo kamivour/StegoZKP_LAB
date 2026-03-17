@@ -1,0 +1,115 @@
+{
+  "tests": [
+    {
+      "test": "T1_valid_proof",
+      "pass": true,
+      "zk_verified": true,
+      "metadata_tag_count": 294,
+      "note": "Expected: PASS"
+    },
+    {
+      "test": "T2_tampered_proof",
+      "pass": true,
+      "tampered_verified": false,
+      "note": "Expected: tampered proof fails verification (Groth16 soundness)"
+    },
+    {
+      "test": "T3_wrong_key",
+      "pass": true,
+      "success": false,
+      "error": "Wrong chaos_key \u2014 SHA-256 hash mismatch",
+      "metadata_revealed": false,
+      "note": "Expected: success=False, no metadata revealed"
+    },
+    {
+      "test": "T4_noproof_integrity",
+      "pass": true,
+      "integrity_ok": true,
+      "zk_verified": false,
+      "note": "Expected: integrity_ok=True, zk_verified=False"
+    },
+    {
+      "test": "T5_artifact_sizes",
+      "pass": true,
+      "sizes": {
+        "verification_key.json": {
+          "bytes": 4570,
+          "kb": 4.5
+        },
+        "proving_key.zkey": {
+          "bytes": 12471724,
+          "kb": 12179.4
+        },
+        "r1cs": {
+          "bytes": 8115276,
+          "kb": 7925.1
+        },
+        "proof_embedded_est_bytes": {
+          "note": "\u22481100 B embedded in stego PNG LSBs"
+        }
+      }
+    },
+    {
+      "test": "T6_constraints",
+      "pass": true,
+      "constraints": 18429,
+      "wires": 18370,
+      "public_inputs": 10,
+      "ptau_level": 16,
+      "ptau_capacity": 65536,
+      "utilisation_pct": 28.1,
+      "note": "Documented values from snarkjs r1cs info at compilation time",
+      "template_breakdown": {
+        "FullPositionVerification (16x ACM)": {
+          "constraints": "~16000",
+          "purpose": "Position integrity"
+        },
+        "PositionMerkleTree (4-level Poseidon)": {
+          "constraints": "~1500",
+          "purpose": "Position commitment"
+        },
+        "AllPositionsRangeProof (32x LessThan)": {
+          "constraints": "~640",
+          "purpose": "Bounds checking"
+        },
+        "SecureMessageCommitment (Poseidon)": {
+          "constraints": "~250",
+          "purpose": "Message binding"
+        },
+        "Nullifier (Poseidon)": {
+          "constraints": "~250",
+          "purpose": "Replay prevention"
+        },
+        "ImageHashVerification": {
+          "constraints": "~8",
+          "purpose": "Image hash binding"
+        }
+      }
+    },
+    {
+      "test": "T7_key_separation",
+      "pass": true,
+      "overlap_count": 0,
+      "proof_positions": 10000,
+      "chaos_positions": 10124,
+      "note": "Expected: 0 overlapping positions (enforced by exclude= in _roi_positions)"
+    },
+    {
+      "test": "T8_key_sensitivity",
+      "pass": true,
+      "key_int_hamming_bits": 38,
+      "key_int_hamming_pct": 59.4,
+      "position_overlap_count": 1,
+      "position_overlap_fraction": 0.002,
+      "random_chance_fraction": 0.002694,
+      "positions_sampled": 500,
+      "total_roi_pixels": 185568,
+      "note": "Single-character key mutation should cause ~50% bit-flip in derived int (SHA-256 avalanche) and near-random position overlap."
+    }
+  ],
+  "summary": {
+    "pass": 8,
+    "total": 8
+  },
+  "test_image": "1-01"
+}
