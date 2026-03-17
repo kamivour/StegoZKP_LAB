@@ -65,7 +65,7 @@ def verify_only(stego_png: str, proof_key: str, verbose: bool, as_json: bool) ->
 
     pixel_array = np.array(Image.open(stego_png), dtype=np.uint16)
     height, width = pixel_array.shape
-    roi_mask = DicomHandler.detect_roi(pixel_array)
+    roi_mask = DicomHandler.detect_border_zone(pixel_array)
 
     proof_key_int = generate_chaos_key_from_secret(proof_key)
     stego_obj = DicomStego()
