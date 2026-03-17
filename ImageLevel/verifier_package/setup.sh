@@ -92,12 +92,29 @@ if [ -z "$PYTHON" ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  2. PYTHON PACKAGES
+#  2. PYTHON PACKAGES (installed into .venv to avoid externally-managed-env)
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo "--- [2/4] Python packages ---"
 
 if [ -n "$PYTHON" ]; then
+    VENV_DIR="$SCRIPT_DIR/.venv"
+
+    # Create virtualenv if it doesn't exist yet
+    if [ ! -f "$VENV_DIR/bin/python" ]; then
+        info "Creating virtual environment at .venv ..."
+        "$PYTHON" -m venv "$VENV_DIR"
+        if [ ! -f "$VENV_DIR/bin/python" ]; then
+            err "venv creation failed. Try: sudo apt-get install python3-venv"
+            ERRORS=$((ERRORS+1))
+        fi
+    else
+        ok "Virtual environment exists (.venv)"
+    fi
+
+    # Switch to venv Python for all package operations
+    PYTHON="$VENV_DIR/bin/python"
+
     # Map: package_name -> import_name
     declare -A PKG_MAP
     PKG_MAP=([pydicom]="pydicom" [Pillow]="PIL" [numpy]="numpy" [scipy]="scipy")

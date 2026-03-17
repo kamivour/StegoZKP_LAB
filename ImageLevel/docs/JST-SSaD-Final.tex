@@ -952,14 +952,16 @@ Table~\ref{tab:net_wire_channels} reports wire-level transfer on two representat
 \toprule
 \textbf{Ch.} & \textbf{Transport} & \textbf{Payload} & \textbf{Time (s)} & \textbf{Mbps} \\
 \midrule
-LAN & TCP/LAN         & [TBD]\,KB & [TBD] & $\approx$[TBD] \\
-CAN & CAN (125\,kbps) & 500\,KB   & 210   & $\approx$0.020 \\
+LAN (case A) & TCP/LAN         & 115.31\,KB & 0.022 & $\approx$42.1 \\
+LAN (case B) & TCP/LAN         & 110.40\,KB & 0.023 & $\approx$39.4 \\
+LAN (case C) & TCP/LAN         & 115.53\,KB & 0.018 & $\approx$51.2 \\
+CAN          & CAN (125\,kbps) & 500\,KB    & 210   & $\approx$0.020 \\
 \bottomrule
-\multicolumn{5}{@{}p{\linewidth}@{}}{\small LAN measurements based on 16-bit stego PNG. CAN measurements retained from baseline stress-test.}
+\multicolumn{5}{@{}p{\linewidth}@{}}{\small LAN: raw TCP sender-side timing across three 512$\times$512 stego-PNG test cases. CAN: baseline stress-test result.}
 \end{tabularx}
 \end{table}
 
-On LAN, large packets reduce per-packet overhead and yield high effective goodput suitable for real-time PACS streaming.
+On LAN, all three test cases completed transfer in under 25\,ms (39.4–51.2\,Mbps), confirming that large-packet TCP transmission yields high effective goodput suitable for real-time PACS streaming.
 The CAN result (210\,s for 500\,KB) is presented as a worst-case stress test of protocol correctness under extreme bandwidth constraints, not as a primary deployment path: in realistic clinical CAN deployments, diagnostic equipment exchanges short control frames rather than full imaging payloads, so only the compact proof artifact ($\approx$1.04\,KB) or a notification message would transit the CAN link, reducing transfer time to under one second at 125\,kbps.
 Full stego-image transfer is intended for LAN/PACS channels; the CAN measurement confirms protocol interoperability at the byte-framing level under constrained conditions.
 

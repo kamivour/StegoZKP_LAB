@@ -82,17 +82,23 @@ echo "============================================================"
 echo "  Phase 3: ZK verification + extraction"
 echo "============================================================"
 
-# Resolve Python command (same logic as setup.sh, fast since already installed)
+# Prefer the venv created by setup.sh (avoids externally-managed-env issues)
 PYTHON=""
-for cmd in python3.13 python3.12 python3.11 python3.10 python3.9 python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        _ver=$("$cmd" -c "import sys; print(sys.version_info.major*100+sys.version_info.minor)" 2>/dev/null || echo 0)
-        if [ "$_ver" -ge 309 ]; then
-            PYTHON="$cmd"
-            break
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
+if [ -f "$VENV_PYTHON" ]; then
+    PYTHON="$VENV_PYTHON"
+else
+    # Fallback: scan system for Python 3.9+
+    for cmd in python3.13 python3.12 python3.11 python3.10 python3.9 python3 python; do
+        if command -v "$cmd" &>/dev/null; then
+            _ver=$("$cmd" -c "import sys; print(sys.version_info.major*100+sys.version_info.minor)" 2>/dev/null || echo 0)
+            if [ "$_ver" -ge 309 ]; then
+                PYTHON="$cmd"
+                break
+            fi
         fi
-    fi
-done
+    done
+fi
 
 if [ -z "$PYTHON" ]; then
     echo "ERROR: Python 3.9+ not found even after setup. Re-open your terminal and retry."
