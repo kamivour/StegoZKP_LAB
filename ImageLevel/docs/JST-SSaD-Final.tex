@@ -75,6 +75,7 @@ Benchmarking across three MR T1 phantom DICOM images yields PSNR $\approx$103.38
 \usepackage{xcolor}
 \definecolor{customgray}{gray}{0.9}
 \usepackage{tabularx}
+\usepackage{makecell}
 
 \lstset{basicstyle=\ttfamily}
 \let\Code\lstinline
@@ -923,9 +924,9 @@ The available border-zone capacity depends on image size and ROI geometry; the p
     \toprule
     \textbf{Image} & \textbf{Border px} & \textbf{Positions used} & \textbf{Utilisation} \\
     \midrule
-    MR T1 phantom 512$\times$512 (case A) & 144,432 & 28,800 & 19.9\% \\
-    MR T1 phantom 512$\times$512 (case B) & 149,075 & 28,736 & 19.3\% \\
-    MR T1 phantom 512$\times$512 (case C) & 140,581 & 28,848 & 20.5\% \\
+    \makecell[l]{MR T1 phantom\\512$\times$512 (case A)} & 144,432 & 28,800 & 19.9\% \\
+    \makecell[l]{MR T1 phantom\\512$\times$512 (case B)} & 149,075 & 28,736 & 19.3\% \\
+    \makecell[l]{MR T1 phantom\\512$\times$512 (case C)} & 140,581 & 28,848 & 20.5\% \\
     \bottomrule
     \multicolumn{4}{@{}l@{}}{\small Positions used = data + undo regions across both key streams.}
     \end{tabularx}
@@ -934,43 +935,13 @@ The available border-zone capacity depends on image size and ROI geometry; the p
 \subsection{Network Performance Analysis and Evaluation}
 \label{subsec:network}
 
-We evaluate communication feasibility under distributed deployments by separating wire-level transfer (network-only goodput) from end-to-end pipeline latency (which includes serialization and software integration overhead).
-Results are reported for two operational phases: (i)~\textbf{setup distribution}, transferring configuration artifacts required to initialize the verifier; and (ii)~\textbf{stego-object transmission}, transferring the generated stego image over representative hospital network channels.
-
-\subsubsection{Setup Distribution Phase}
-
-Table~\ref{tab:net_setup_p2p} summarizes setup artifact transfer over WiFi P2P between two nodes.
-The setup bundle completes in 0.065\,s at 59.17\,Mbps, confirming that one-time verifier initialization is negligible in overhead.
-
-\begin{table}[t]
-\centering
-\small
-\setlength{\tabcolsep}{5pt}
-\renewcommand{\arraystretch}{1.15}
-\caption{Setup distribution over WiFi P2P (wire-level).}
-\label{tab:net_setup_p2p}
-\begin{tabularx}{\columnwidth}{@{}l >{\raggedleft\arraybackslash}X@{}}
-\toprule
-\textbf{Metric} & \textbf{Value} \\
-\midrule
-Total files          & 10 \\
-Total size           & 0.222\,MB \\
-Total time           & 0.065\,s \\
-Avg.\ throughput     & 59.17\,Mbps \\
-Total packets        & 271 \\
-Avg.\ time/file      & 0.007\,s \\
-File size (min--max) & 8.6--40.3\,KB \\
-\bottomrule
-\multicolumn{2}{@{}p{\linewidth}@{}}{\small Reference data from prior system version; retained as baseline. Stego image size and proof payload are updated in Table~\ref{tab:net_e2e_http}.}
-\end{tabularx}
-\end{table}
-
-\subsubsection{Stego-Object Transmission Phase}
+We evaluate communication feasibility under distributed deployments by separating wire-level transfer (network-only goodput) from end-to-end pipeline latency (which includes serialization, zero-knowledge proof generation, and software integration overhead).
+Because the framework assumes a one-time, out-of-band setup phase to distribute the verification keys and scripts (as detailed in Section~\ref{subsec:extraction}), this evaluation focuses strictly on the steady-state operational phase: the transmission of the generated stego-image.
 
 \paragraph{Wire-level transfer across channels.}
 Table~\ref{tab:net_wire_channels} reports wire-level transfer on two representative hospital network channels: Ethernet LAN and CAN bus.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \centering
 \small
 \setlength{\tabcolsep}{4pt}
@@ -981,10 +952,10 @@ Table~\ref{tab:net_wire_channels} reports wire-level transfer on two representat
 \toprule
 \textbf{Ch.} & \textbf{Transport} & \textbf{Payload} & \textbf{Time (s)} & \textbf{Mbps} \\
 \midrule
-LAN & TCP/loopback    & 1.289\,MB & 0.051 & $\approx$212 \\
+LAN & TCP/LAN         & [TBD]\,KB & [TBD] & $\approx$[TBD] \\
 CAN & CAN (125\,kbps) & 500\,KB   & 210   & $\approx$0.020 \\
 \bottomrule
-\multicolumn{5}{@{}p{\linewidth}@{}}{\small Reference data from prior system version; retained as baseline. Stego image size and proof payload are updated in Table~\ref{tab:net_e2e_http}.}
+\multicolumn{5}{@{}p{\linewidth}@{}}{\small LAN measurements based on 16-bit stego PNG. CAN measurements retained from baseline stress-test.}
 \end{tabularx}
 \end{table}
 
@@ -995,7 +966,7 @@ Full stego-image transfer is intended for LAN/PACS channels; the CAN measurement
 \paragraph{End-to-end pipeline latency over HTTP/TCP.}
 Table~\ref{tab:net_e2e_http} reports end-to-end transfer time over HTTP/TCP, including application-layer processing overhead.
 
-\begin{table}[t]
+\begin{table}[htbp]
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4pt}
