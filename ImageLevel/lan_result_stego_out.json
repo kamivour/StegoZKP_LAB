@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-03-17T16:02:41.376777+00:00",
+  "timestamp": "2026-03-17T16:29:04.806844+00:00",
   "receiver_ip": "192.168.1.2",
   "port": 9000,
   "file": "stego_out.png",
   "file_size_bytes": 118275,
   "file_size_kb": 115.5,
-  "elapsed_s": 0.031147,
-  "throughput_mbps": 30.379,
+  "elapsed_s": 0.101232,
+  "throughput_mbps": 9.347,
   "transport": "TCP/LAN",
   "note": "Sender-side measurement; timer starts after header, stops on ACK receipt."
 }

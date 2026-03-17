@@ -451,19 +451,27 @@ Operators should verify that $|\mathcal{B}| \geq 2(N_{\text{proof}} + N_{\text{m
 
 \begin{figure}[htbp]
     \centering
-    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
-    \small\textit{[FIGURE PLACEHOLDER --- Fig.~2: Border Zone Illustration]}\\[4pt]
-    Three-panel figure from a representative DICOM slice (e.g., 1-04.dcm).\\
-    (a) Original 16-bit grayscale image.\\
-    (b) ROI mask (white = tissue, black = background air).\\
-    (c) Border zone highlighted (colored ring) showing the outermost 10-pixel
-    ring; the diagnostic core is visible as the darker unlabelled interior.\\
-    Demonstrates that core brain/organ tissue is never modified.
-    \vspace{2.5cm}}}
-    \caption{Border zone detection. The embedding target is restricted to the
-    outermost $M_e=10$ pixel ring of the Region of Interest, computed by
-    morphological erosion. Core diagnostic tissue (inner ROI) is never
-    modified.}
+    \subfigure[Original.]{%
+        \includegraphics[width=0.30\linewidth]{figs/fig2a_original.png}%
+        \label{fig:bz-original}%
+    }%
+    \hfill
+    \subfigure[ROI mask.]{%
+        \includegraphics[width=0.30\linewidth]{figs/fig2b_roi.png}%
+        \label{fig:bz-roi}%
+    }%
+    \hfill
+    \subfigure[Border zone.]{%
+        \includegraphics[width=0.30\linewidth]{figs/fig2c_target.png}%
+        \label{fig:bz-target}%
+    }%
+    \caption{Border zone detection on a representative MR phantom slice.
+    (a)~Original 16-bit DICOM image (normalized for display).
+    (b)~Binary ROI mask; white denotes the phantom tissue body and black
+    denotes background air.
+    (c)~Outermost $M_e{=}10$ pixel border ring (orange) derived by
+    morphological erosion~\eqref{eq:borderzone}; the diagnostic core is
+    never modified.}
     \label{fig:border-zone}
 \end{figure}
 
@@ -563,35 +571,41 @@ meta\_data  & Gzip-compressed DICOM metadata & 10,132 & chaos\_key \\
 
 \begin{figure}[htbp]
     \centering
-    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
-    \small\textit{[FIGURE PLACEHOLDER --- Fig.~3: Stego Visual Comparison]}\\[4pt]
-    Three panels from one DICOM slice (e.g., 1-04.dcm).\\
-    (a) Original 16-bit grayscale image.\\
-    (b) Stego 16-bit grayscale (visually identical to (a)).\\
-    (c) Absolute difference image, amplified $\times$1000: only the
-    10-pixel border ring shows nonzero values; the diagnostic core is
-    uniformly black, confirming zero modification of core tissue.
-    \vspace{2.5cm}}}
+    \subfigure[Original.]{%
+        \includegraphics[width=0.30\linewidth]{figs/fig3a_original.png}%
+        \label{fig:cmp-original}%
+    }%
+    \hfill
+    \subfigure[Stego.]{%
+        \includegraphics[width=0.30\linewidth]{figs/fig3b_stego.png}%
+        \label{fig:cmp-stego}%
+    }%
+    \hfill
+    \subfigure[Difference $\times1000$.]{%
+        \includegraphics[width=0.30\linewidth]{figs/fig3c_diff.png}%
+        \label{fig:cmp-diff}%
+    }%
     \caption{Visual comparison between original DICOM and stego image.
-    The amplified difference map (right) confirms that distortion is
-    confined to the border zone.}
+    (a)~Original 16-bit grayscale phantom (normalized for display).
+    (b)~Stego image; perceptually identical to~(a).
+    (c)~Absolute pixel difference amplified $\times1000$: nonzero values
+    (8.22\% of pixels, max raw error $\leq3$ out of 65,535 intensity levels)
+    appear only in the border zone; the diagnostic core is uniformly black,
+    confirming zero modification of core tissue.
+    The amplified difference map confirms that distortion is confined to the
+    border zone.}
     \label{fig:image-comparison}
 \end{figure}
 
 \begin{figure}[htbp]
     \centering
-    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
-    \small\textit{[FIGURE PLACEHOLDER --- Fig.~4: RDH Region Map]}\\[4pt]
-    Color-coded overlay on the border zone of a DICOM slice.\\
-    Four color regions: proof\_undo (color A), proof\_data (color B),
-    meta\_undo (color C), meta\_data (color D).\\
-    Illustrates the non-overlapping partition of border pixels into
-    four chaos-trajectory segments.
-    \vspace{2.5cm}}}
+    \includegraphics[width=0.8\linewidth]{figs/rdh_regions_fig.png}
     \caption{RDH region layout within the border zone.
     Four non-overlapping position sets are derived from two independent
-    chaos trajectories; undo regions store original LSBs for pixel
-    restoration after extraction.}
+    chaos trajectories (cyan: \texttt{proof\_data}, red: \texttt{proof\_undo},
+    green: \texttt{meta\_data}, yellow: \texttt{meta\_undo});
+    undo regions store original LSBs for pixel restoration after extraction.
+    Non-overlap is verified: 28,544 total positions, union=28,544.}
     \label{fig:rdh-regions}
 \end{figure}
 
@@ -804,7 +818,7 @@ Given a stego PNG and the proof key (public), the extraction pipeline proceeds a
 
 \noindent
 Return values: \texttt{success}, \texttt{zk\_verified},
-\texttt{metadata\_dict} ($\approx$294 tags), \texttt{restored\_pixel\_array}.
+\texttt{metadata\_\allowbreak dict} ($\approx$294 tags), \texttt{restored\_\allowbreak pixel\_\allowbreak array}.
 
 \section{Experimental Results and Evaluation}
 \label{sec:results}
@@ -858,16 +872,18 @@ All quality scores are computed between the 16-bit cover image and the stego ima
     \caption{Image Quality and Proof Metrics}
     \label{tab:quality-full}
     \resizebox{\textwidth}{!}{%
+        \small
         \begin{tabular}{lcccccccc}
             \toprule
             \textbf{Image / Test Case} & \textbf{PSNR (dB)} & \textbf{SSIM} & \textbf{MSE} &
-            \textbf{Border px} & \textbf{Positions used} & \textbf{PG (s)} & \textbf{PV (ms)} & \textbf{Proof size (KB)} \\
+            \textbf{Border px} & \textbf{Positions used} & \textbf{PG (s)} & \textbf{PV (ms)} & \textbf{PS (KB)} \\
             \midrule
             MR T1 phantom 512$\times$512 (case A) & 103.38 & 1.000000 & 0.197 & 144,432 & 28,800 (19.9\%) & 8.2 & 3,417 & 1.04 \\
             MR T1 phantom 512$\times$512 (case B) & 103.38 & 1.000000 & 0.197 & 149,075 & 28,736 (19.3\%) & 5.8 & 3,049 & 1.04 \\
             MR T1 phantom 512$\times$512 (case C) & 103.34 & 1.000000 & 0.199 & 140,581 & 28,848 (20.5\%) & 5.9 & 3,022 & 1.04 \\
             \bottomrule
-            \multicolumn{9}{@{}l@{}}{\small PG = proof generation time. PV = wall-clock verification time including Node.js process startup ($\approx$3\,s); cryptographic pairing time is $\approx$1--3\,ms in native implementations. Positions used = data + undo.}
+            \multicolumn{9}{@{}l@{}}{\small PG = proof generation time. PV = wall-clock verification time. PS = proof size.
+            Positions used = data + undo.}
         \end{tabular}%
     }
 \end{table*}
@@ -878,20 +894,29 @@ To assess imperceptibility at the statistical level, per-pixel histograms of the
 \prettyref{fig:hist} illustrates the grayscale intensity histograms.
 Because embedding is restricted to the border zone (at most 20.5\% of pixels) and modifies at most 2 LSBs (values $\pm 3$ at 16-bit), the histogram curves are nearly identical, with minor deviations concentrated in the boundary-pixel range.
 
-\begin{figure}[htbp]
+\begin{figure*}[t]
     \centering
-    \fbox{\parbox{0.93\linewidth}{\centering\vspace{2.5cm}
-    \small\textit{[FIGURE PLACEHOLDER --- Fig.~5: Grayscale Histogram Comparison]}\\[4pt]
-    Two subplots.\\
-    (a) Overlaid 16-bit grayscale histograms of original vs. stego image
-    (full intensity range or normalized): curves nearly identical.\\
-    (b) Zoom-in on the border-zone pixel intensity range showing the small
-    distribution shift from 2-bit LSB modification.
-    \vspace{2.5cm}}}
+    \subfigure[Full range.]{%
+        \includegraphics[width=0.45\linewidth]{figs/fig5a_hist_full.png}%
+        \label{fig:hist-full}%
+    }%
+    \\[2ex]
+    \subfigure[Zoom: intensities {[}32751--32801{]}.]{%
+        \includegraphics[width=0.45\linewidth]{figs/fig5b_hist_zoom.png}%
+        \label{fig:hist-zoom}%
+    }%
     \caption{Grayscale histogram comparison between cover and stego images.
-    Distributions remain nearly identical, confirmed by $\Delta H < 0.021$\,bits and $\mathrm{JSD} < 5\times10^{-4}$ across all test cases (Section~\ref{sec:results}).}
+    (a)~Overlaid 16-bit intensity histograms (512 bins, background pixels
+    excluded); original in blue, stego in red dashed --- curves are visually
+    indistinguishable.
+    (b)~Zoom on the dominant peak at intensities $[32751, 32801]$ with
+    1\,bin/value, revealing the $\pm3$ LSB jitter introduced at
+    border-zone pixels.
+    Distributions remain nearly identical, confirmed by $\Delta H < 0.021$\,bits
+    and $\mathrm{JSD} < 5\times10^{-4}$ across all test cases
+    (Section~\ref{sec:results}).}
     \label{fig:hist}
-\end{figure}
+\end{figure*}
 
 Shannon entropy and Jensen-Shannon divergence~(JSD) are used to quantify distribution drift.
 Let $P(i)$ and $Q(i)$ be empirical intensity histograms of cover and stego:
