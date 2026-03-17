@@ -105,18 +105,30 @@ if [ -z "$PYTHON" ]; then
     exit 1
 fi
 
-VERIFY_SCRIPT="$SCRIPT_DIR/scripts/verify.py"
+VERIFY_SCRIPT="$SCRIPT_DIR/scripts/dicom_extract.py"
 if [ ! -f "$VERIFY_SCRIPT" ]; then
-    echo "ERROR: verify.py not found at: $VERIFY_SCRIPT"
+    echo "ERROR: dicom_extract.py not found at: $VERIFY_SCRIPT"
     exit 1
+fi
+
+# Auto-detect chaos_key.txt; fall back to --verify-only (public-auditor) if absent
+KEY_ARG=""
+CHAOS_KEY_FILE="$SCRIPT_DIR/chaos_key.txt"
+if [[ " $EXTRA_ARGS " != *"--verify-only"* ]]; then
+    if [ -f "$CHAOS_KEY_FILE" ]; then
+        KEY_ARG="--key-file $CHAOS_KEY_FILE"
+    else
+        echo "Note: chaos_key.txt not found — running in public-auditor mode (--verify-only)."
+        KEY_ARG="--verify-only"
+    fi
 fi
 
 echo "Image:  $IMAGE"
 echo "Script: $VERIFY_SCRIPT"
 echo ""
 
-# Run verification — passes through any extra args (-v, --json, etc.)
-"$PYTHON" "$VERIFY_SCRIPT" "$IMAGE" $EXTRA_ARGS
+# Run extraction/verification — passes through any extra args (-v, --json, etc.)
+"$PYTHON" "$VERIFY_SCRIPT" "$IMAGE" $KEY_ARG $EXTRA_ARGS
 EXIT_CODE=$?
 
 echo ""

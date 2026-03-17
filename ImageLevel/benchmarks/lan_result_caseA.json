@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-03-17T15:24:10.743876+00:00",
+  "timestamp": "2026-03-17T15:51:47.198182+00:00",
   "receiver_ip": "192.168.1.2",
   "port": 9000,
   "file": "paper_zk_1-04.png",
   "file_size_bytes": 118075,
   "file_size_kb": 115.31,
-  "elapsed_s": 0.022422,
-  "throughput_mbps": 42.127,
+  "elapsed_s": 0.104055,
+  "throughput_mbps": 9.078,
   "transport": "TCP/LAN",
   "note": "Sender-side measurement; timer starts after header, stops on ACK receipt."
 }
